@@ -43,8 +43,11 @@ public class TeeTeamXref {
 	private Team team;
 	
 	
-	@OneToMany(mappedBy="teeTeamXref" , cascade=CascadeType.ALL, orphanRemoval=true, fetch=FetchType.EAGER)
-	private List<PlayerScore> playScoreList;
+	/*
+	 * @OneToMany(mappedBy="teeTeamXref" , cascade=CascadeType.ALL,
+	 * orphanRemoval=true, fetch=FetchType.EAGER) private List<PlayerScore>
+	 * playScoreList;
+	 */
 
 
 	public Long getId() {
@@ -97,15 +100,13 @@ public class TeeTeamXref {
 	}
 
 
-	public List<PlayerScore> getPlayScoreList() {
-		return playScoreList;
-	}
-
-
-	public void setPlayScoreList(List<PlayerScore> playScoreList) {
-		this.playScoreList = playScoreList;
-	}
-
+	/*
+	 * public List<PlayerScore> getPlayScoreList() { return playScoreList; }
+	 * 
+	 * 
+	 * public void setPlayScoreList(List<PlayerScore> playScoreList) {
+	 * this.playScoreList = playScoreList; }
+	 */
 
 
 

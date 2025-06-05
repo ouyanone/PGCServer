@@ -11,5 +11,9 @@ public interface PlayerRepository extends CrudRepository<Player, Long>{
 	
 	Player findFirstByGhinNumber(String id);
 	
+	Iterable<Player> findByIsActive(boolean isActive);
+
+	Player findByNickName(String trim);
+	
 
 }

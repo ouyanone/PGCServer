@@ -25,6 +25,7 @@ import com.shiyuan.dao.entity.TeeObject;
 import com.shiyuan.dao.entity.db.Course;
 import com.shiyuan.dao.entity.db.Donation;
 import com.shiyuan.dao.entity.db.Event;
+import com.shiyuan.dao.entity.db.EventUser;
 import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.PlayerScore;
 import com.shiyuan.dao.entity.db.ScoreStatistic;
@@ -86,7 +87,7 @@ public class PlayerServiceImpl implements PlayerService {
 
 	@Override
 	public List<Player> getAllPlayers() {
-		Iterable<Player> pi = playerRepository.findAll();
+		Iterable<Player> pi = playerRepository.findByIsActive(true);
 		List<Player> pList = new ArrayList<Player>();
 
 		pi.forEach(pList::add);
@@ -198,11 +199,11 @@ public class PlayerServiceImpl implements PlayerService {
 				PlayerScore ps = new PlayerScore();
 				ps.setEntryScore(player.getLast3GameAvg());
 				ps.setPlayer(player);
-				ps.setTeeTeamXref(teeTeamXrefA);
+				//ps.setTeeTeamXref(teeTeamXrefA);
 				ps.setScoreDate(date);
 				psListA.add(ps);
 			}
-			teeTeamXrefA.setPlayScoreList(psListA);
+			//teeTeamXrefA.setPlayScoreList(psListA);
 
 			TeeTeamXref teeTeamXrefB = new TeeTeamXref();
 			Team teamB = teamRepository.findById(2L).orElse(null);
@@ -215,11 +216,11 @@ public class PlayerServiceImpl implements PlayerService {
 				PlayerScore ps = new PlayerScore();
 				ps.setEntryScore(player.getLast3GameAvg());
 				ps.setPlayer(player);
-				ps.setTeeTeamXref(teeTeamXrefB);
+				//ps.setTeeTeamXref(teeTeamXrefB);
 				ps.setScoreDate(date);
 				psListB.add(ps);
 			}
-			teeTeamXrefB.setPlayScoreList(psListB);
+			//teeTeamXrefB.setPlayScoreList(psListB);
 
 			teeTeamXrefList.add(teeTeamXrefA);
 			teeTeamXrefList.add(teeTeamXrefB);
@@ -250,16 +251,21 @@ public class PlayerServiceImpl implements PlayerService {
 				
 				String teeName = tee.getTeeName();
 				for(TeeTeamXref ttXref: tee.getTeeTeamXrefList()) {
-					List<PlayerScore> playerScoreList = ttXref.getPlayScoreList();
-					for (PlayerScore playerScore: playerScoreList ) {
-						Player player = playerScore.getPlayer();
-						Double entryScore = playerScore.getEntryScore();
-						Integer score = playerScore.getScore();
-						
-						
-						System.out.println("On "+eventDate+", Golf player "+ player.getfName()+" "+ player.getlName()+ " played at "+club +" "+course+" course with entry score of "+entryScore+ " and the actual score was "+score+"."+ teeMsg(playerScore.getTeeWin()) + teamMsg(playerScore.getTeamWin())  );
-						
-					}
+					//List<PlayerScore> playerScoreList = ttXref.getPlayScoreList();
+					/*
+					 * for (PlayerScore playerScore: playerScoreList ) { Player player =
+					 * playerScore.getPlayer(); Double entryScore = playerScore.getEntryScore();
+					 * Integer score = playerScore.getScore();
+					 * 
+					 * 
+					 * System.out.println("On "+eventDate+", Golf player "+ player.getfName()+" "+
+					 * player.getlName()+ " played at "+club
+					 * +" "+course+" course with entry score of "+entryScore+
+					 * " and the actual score was "+score+"."+ teeMsg(playerScore.getTeeWin()) +
+					 * teamMsg(playerScore.getTeamWin()) );
+					 * 
+					 * }
+					 */
 					
 					
 				}
@@ -317,18 +323,14 @@ public class PlayerServiceImpl implements PlayerService {
 					System.out.println("-----teamAScore::"+teamAScore);
 				}
 
-				List<PlayerScore> playerScoreList = teeTeamXref.getPlayScoreList();
-				for (PlayerScore playerScore : playerScoreList) {
-					System.out.println("player Score::" + playerScore.getScore());
-					playerScore.setTeeTeamXref(teeTeamXref);
-					if (teeTeamXref.getScore() > 0) {
-						playerScore.setTeeWin(1);
-					} else if (teeTeamXref.getScore() == 0) {
-						playerScore.setTeeWin(0);
-					} else {
-						playerScore.setTeeWin(-1);
-					}
-				}
+				//List<PlayerScore> playerScoreList = teeTeamXref.getPlayScoreList();
+				/*
+				 * for (PlayerScore playerScore : playerScoreList) {
+				 * System.out.println("player Score::" + playerScore.getScore());
+				 * //playerScore.setTeeTeamXref(teeTeamXref); if (teeTeamXref.getScore() > 0) {
+				 * playerScore.setTeeWin(1); } else if (teeTeamXref.getScore() == 0) {
+				 * playerScore.setTeeWin(0); } else { playerScore.setTeeWin(-1); } }
+				 */
 			}
 
 		}
@@ -353,16 +355,15 @@ public class PlayerServiceImpl implements PlayerService {
 						teamAWin = -1;
 					}
 				}
-				List<PlayerScore> playerScoreList = teeTeamXref.getPlayScoreList();
-				for (PlayerScore playerScore : playerScoreList) {
-
-					if (isTeamA) {
-						playerScore.setTeamWin(teamAWin);
-					} else {
-						playerScore.setTeamWin(teamAWin * -1);
-					}
-
-				}
+				/*
+				 * List<PlayerScore> playerScoreList = teeTeamXref.getPlayScoreList(); for
+				 * (PlayerScore playerScore : playerScoreList) {
+				 * 
+				 * if (isTeamA) { playerScore.setTeamWin(teamAWin); } else {
+				 * playerScore.setTeamWin(teamAWin * -1); }
+				 * 
+				 * }
+				 */
 			}
 
 		}
@@ -436,16 +437,21 @@ public class PlayerServiceImpl implements PlayerService {
 				
 				String teeName = tee.getTeeName();
 				for(TeeTeamXref ttXref: tee.getTeeTeamXrefList()) {
-					List<PlayerScore> playerScoreList = ttXref.getPlayScoreList();
-					for (PlayerScore playerScore: playerScoreList ) {
-						Player player = playerScore.getPlayer();
-						Double entryScore = playerScore.getEntryScore();
-						Integer score = playerScore.getScore();
-						
-						
-						System.out.println("On "+eventDate+", Golf player "+ player.getfName()+" "+ player.getlName()+ " played at "+club +" "+course+" course with entry score of "+entryScore+ " and the actual score was "+score+"."+ teeMsg(playerScore.getTeeWin()) + teamMsg(playerScore.getTeamWin())  );
-						
-					}
+					/*
+					 * List<PlayerScore> playerScoreList = ttXref.getPlayScoreList(); for
+					 * (PlayerScore playerScore: playerScoreList ) { Player player =
+					 * playerScore.getPlayer(); Double entryScore = playerScore.getEntryScore();
+					 * Integer score = playerScore.getScore();
+					 * 
+					 * 
+					 * System.out.println("On "+eventDate+", Golf player "+ player.getfName()+" "+
+					 * player.getlName()+ " played at "+club
+					 * +" "+course+" course with entry score of "+entryScore+
+					 * " and the actual score was "+score+"."+ teeMsg(playerScore.getTeeWin()) +
+					 * teamMsg(playerScore.getTeamWin()) );
+					 * 
+					 * }
+					 */
 					
 					
 				}
@@ -457,6 +463,27 @@ public class PlayerServiceImpl implements PlayerService {
 		
 		return eList;
 	}
+
+	@Override
+	public List<EventUser> onboardEventUser(String eventId, List<EventUser> eventUsers) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	/*
+	 * @Override public List<EventUser> onboardEventUser(String eventId,
+	 * List<EventUser> eventUsers) { List<EventUser> eventUsersAdded; for (EventUser
+	 * user : eventUsers) { String id = user.getId(); String weChatName =
+	 * user.getWeChatName(); Player player =
+	 * playerRepository.findByNickName(weChatName.trim()); PlayerScore playerScore =
+	 * playerScoreRepository.findFirstByPalyerId(player.getId()); if
+	 * (playerScore==null) { PlayerScore ps = new PlayerScore();
+	 * ps.setPlayer(player); Tee tee =
+	 * teeRepository.findByEventIdAndTeeName(eventId, ""); ps.setTee(tee);
+	 * playerScoreRepository.save(ps); eventUsersAdded.add(user); }
+	 * 
+	 * } return eventUsersAdded; }
+	 */
 
 
 

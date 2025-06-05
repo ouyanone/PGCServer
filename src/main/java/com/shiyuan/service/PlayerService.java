@@ -6,6 +6,7 @@ import com.shiyuan.dao.entity.EventGroup;
 import com.shiyuan.dao.entity.GhinUser;
 import com.shiyuan.dao.entity.db.Donation;
 import com.shiyuan.dao.entity.db.Event;
+import com.shiyuan.dao.entity.db.EventUser;
 import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.ScoreStatistic;
 
@@ -35,6 +36,8 @@ public interface PlayerService {
 	Event getUpcomingEvent();
 
 	List<Event> getLatestEvents();
+
+	List<EventUser> onboardEventUser(String eventId, List<EventUser> eventUsers);
 
 	
 

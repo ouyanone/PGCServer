@@ -47,11 +47,18 @@ public class PlayerScore {
 	@JoinColumn(name="player_id")
 	private Player player;
 	
-	@JsonIgnore
 	@ManyToOne
-	@Cascade(value={org.hibernate.annotations.CascadeType.ALL})
-	@JoinColumn(name="tee_team_xref_id")
-	private TeeTeamXref teeTeamXref;
+	@JoinColumn(name="tee_id")
+	private Tee tee;
+	/*
+	 * @JsonIgnore
+	 * 
+	 * @ManyToOne
+	 * 
+	 * @Cascade(value={org.hibernate.annotations.CascadeType.ALL})
+	 * 
+	 * @JoinColumn(name="player_id") private Player teeTeamXref;
+	 */
 
 	public Long getId() {
 		return id;
@@ -117,18 +124,19 @@ public class PlayerScore {
 		this.player = player;
 	}
 
-	public TeeTeamXref getTeeTeamXref() {
-		return teeTeamXref;
+
+	public Tee getTee() {
+		return tee;
 	}
 
-	public void setTeeTeamXref(TeeTeamXref teeTeamXref) {
-		this.teeTeamXref = teeTeamXref;
+	public void setTee(Tee tee) {
+		this.tee = tee;
 	}
 
 	@Override
 	public String toString() {
 		return "PlayerScore [id=" + id + ", recordStory=" + recordStory + ", entryScore=" + entryScore + ", score="
 				+ score + ", scoreDate=" + scoreDate + ", teamWin=" + teamWin + ", teeWin=" + teeWin + ", player="
-				+ player + ", teeTeamXref=" + teeTeamXref + "]";
+				+ player + ", teeTeamXref=" +  "]";
 	}
 }

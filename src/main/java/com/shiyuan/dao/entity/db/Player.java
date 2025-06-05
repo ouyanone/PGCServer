@@ -53,11 +53,26 @@ public class Player {
 	private String desc;
 	
 	@Column(name = "last_3_game_avg")
-	private double last3GameAvg;
+	private double last3GameAvg=0;
+	
+	@Column(name = "pgc_handicap")
+	private Double pgcHandicap;
+	
+
+	@Column(name = "isPGC2025")
+	private Boolean isPgc2025;
+	
+	@Column(name = "is_Active")
+	private Boolean isActive;
 	
 	
+
+
+
 	@Column(name = "level")
-	private int level;
+	private int level=0;
+	
+	
 	
 	
 	public Long getId() {
@@ -180,6 +195,30 @@ public class Player {
 		this.level = level;
 	}
 
+	public Double getPgcHandicap() {
+		return pgcHandicap;
+	}
+
+	public void setPgcHandicap(Double pgcHandicap) {
+		this.pgcHandicap = pgcHandicap;
+	}
+
+	public Boolean isPgc2025() {
+		return isPgc2025;
+	}
+
+	public void setPgc2025(Boolean isPgc2025) {
+		this.isPgc2025 = isPgc2025;
+	}
+
+	public Boolean getIsActive() {
+		return isActive;
+	}
+
+	public void setIsActive(Boolean isActive) {
+		this.isActive = isActive;
+	}
+	
 	@Override
 	public String toString() {
 		return "Player [id=" + id + ", fName=" + fName + ", lName=" + lName + ", ghinNumber=" + ghinNumber + ", phone="

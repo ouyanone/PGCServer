@@ -33,6 +33,7 @@ import com.shiyuan.dao.entity.AccessToken;
 import com.shiyuan.dao.entity.EventGroup;
 import com.shiyuan.dao.entity.db.Donation;
 import com.shiyuan.dao.entity.db.Event;
+import com.shiyuan.dao.entity.db.EventUser;
 import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.ScoreStatistic;
 import com.shiyuan.service.PlayerService;
@@ -165,7 +166,7 @@ public class MainController {
 		checkPrincipal(principal);
 		System.out.println("input submitScore="+event.getTeeList().get(0).getTeeTeamXrefList().size());
 		System.out.println("input submitScore="+event);
-		System.out.println("input submitScore="+event.getTeeList().get(0).getTeeTeamXrefList().get(0).getPlayScoreList().get(0).getScore());
+		//System.out.println("input submitScore="+event.getTeeList().get(0).getTeeTeamXrefList().get(0).getPlayScoreList().get(0).getScore());
 		playerService.submitScore(event);
 		return new ResponseEntity<Object>(null, HttpStatus.OK);
 	}
@@ -269,5 +270,42 @@ public class MainController {
         }
 	}	
 	
+	
+	@CrossOrigin("*")
+	@PostMapping(path = "/webapi/event/onboard/{eventId}", produces=MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<Object> onboardEventUser(@PathVariable("eventId") String eventId, @RequestBody List<EventUser> eventUsers, @AuthenticationPrincipal OidcUser principal) throws Exception {
+		checkPrincipal(principal);
+		List<EventUser> eventUser = playerService.onboardEventUser(eventId, eventUsers);
+		//System.out.println("pList ======  "+scoreList.size());
+		
+		return new ResponseEntity<Object>(eventUser, HttpStatus.OK); 
+	}
+	
+	/*
+	 * @CrossOrigin("*")
+	 * 
+	 * @GetMapping(path = "/webapi/event/onboard/{eventId}",
+	 * produces=MediaType.APPLICATION_JSON_VALUE) public ResponseEntity<Object>
+	 * onboardEventUser(@PathVariable("eventId") String eventId) throws Exception {
+	 * 
+	 * List<Player> players = playerService.getAllPlayersFromEventId(eventId);
+	 * //System.out.println("pList ======  "+scoreList.size());
+	 * 
+	 * return new ResponseEntity<Object>(players, HttpStatus.OK); }
+	 * 
+	 * 
+	 * @CrossOrigin("*")
+	 * 
+	 * @GetMapping(path = "/webapi/event/onboard/{eventId}",
+	 * produces=MediaType.APPLICATION_JSON_VALUE) public ResponseEntity<Object>
+	 * onboardEventUser(@PathVariable("eventId") String eventId) throws Exception {
+	 * 
+	 * List<Player> players = playerService.getAllPlayersFromEventId(eventId);
+	 * 
+	 * 
+	 * //System.out.println("pList ======  "+scoreList.size());
+	 * 
+	 * return new ResponseEntity<Object>(players, HttpStatus.OK); }
+	 */
 	
 }
