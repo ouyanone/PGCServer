@@ -31,12 +31,18 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.shiyuan.dao.entity.AccessToken;
 import com.shiyuan.dao.entity.EventGroup;
+import com.shiyuan.dao.entity.PlayerGolfScore;
+import com.shiyuan.dao.entity.PlayerGolfScoreEntrys;
 import com.shiyuan.dao.entity.db.Donation;
 import com.shiyuan.dao.entity.db.Event;
 import com.shiyuan.dao.entity.db.EventUser;
 import com.shiyuan.dao.entity.db.Player;
+import com.shiyuan.dao.entity.db.PlayerScore;
+import com.shiyuan.dao.entity.db.Reward;
 import com.shiyuan.dao.entity.db.ScoreStatistic;
 import com.shiyuan.service.PlayerService;
+
+import io.micrometer.common.util.StringUtils;
 
 @RestController
 public class MainController {
@@ -157,6 +163,16 @@ public class MainController {
 		return new ResponseEntity<Object>(event, HttpStatus.OK);
 	}
 	
+	@CrossOrigin("*")
+	@GetMapping(path = "/webapi/events/find/ongoing", produces=MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<Object> getEventsById() throws Exception {
+		String id = "1144";
+		Event event = playerService.getEventById(id);
+		//eList.forEach((p) -> p.setTeeList(null));
+		System.out.println("event ======  "+event);
+		
+		return new ResponseEntity<Object>(event, HttpStatus.OK);
+	}
 	
 	
 	@CrossOrigin("*")
@@ -164,7 +180,7 @@ public class MainController {
 	public ResponseEntity<Object> submitScore(@RequestBody Event event, @AuthenticationPrincipal OidcUser principal) throws Exception {
 		log.debug("input eventGroup="+event);
 		checkPrincipal(principal);
-		System.out.println("input submitScore="+event.getTeeList().get(0).getTeeTeamXrefList().size());
+		//System.out.println("input submitScore="+event.getTeeList().get(0).getTeeTeamXrefList().size());
 		System.out.println("input submitScore="+event);
 		//System.out.println("input submitScore="+event.getTeeList().get(0).getTeeTeamXrefList().get(0).getPlayScoreList().get(0).getScore());
 		playerService.submitScore(event);
@@ -307,5 +323,56 @@ public class MainController {
 	 * 
 	 * return new ResponseEntity<Object>(players, HttpStatus.OK); }
 	 */
+	
+	
+	@CrossOrigin("*")
+	@GetMapping(path = "/webapi/event/reward", produces=MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<Object> getRewardForEvent(@RequestParam(required = false) String eventId) throws Exception {
+		if (StringUtils.isEmpty(eventId)) {
+			eventId="1144";
+		}
+		
+		Long eventLongId = Long.parseLong(eventId);
+		
+		List<Reward> rewardList = playerService.findRewardForEvent(eventLongId);
+		//eList.forEach((p) -> p.setTeeList(null));
+		//System.out.println("pList ======  "+scoreList.size());
+		
+		return new ResponseEntity<Object>(rewardList, HttpStatus.OK);
+	}	
+	
+	@CrossOrigin("*")
+	@GetMapping(path = "/webapi/event/score", produces=MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<Object> getScoreForEvent(@RequestParam(required = false) String eventId) throws Exception {
+		if (StringUtils.isEmpty(eventId)) {
+			eventId="1144";
+		}
+		Long eventLongId = Long.parseLong(eventId);
+		List<PlayerScore> psList = playerService.findPlayerScoreForEvent(eventLongId);
+		//eList.forEach((p) -> p.setTeeList(null));
+		//System.out.println("pList ======  "+scoreList.size());
+		
+		return new ResponseEntity<Object>(psList, HttpStatus.OK);
+	}	
+	
+	@CrossOrigin("*")
+	@PostMapping(path = "/webapi/event/scores", produces=MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<Object> submitEventScore(@RequestBody List<PlayerGolfScore> scores, @AuthenticationPrincipal OidcUser principal) throws Exception {
+		//checkPrincipal(principal);
+		playerService.submitPlayerScore(scores);
+		//System.out.println("pList ======  "+scoreList.size());
+		
+		return new ResponseEntity<Object>("successful", HttpStatus.OK); 
+	}
+	
+	@CrossOrigin("*")
+	@PostMapping(path = "/webapi/event/create/playerscores", produces=MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<Object> addEventPlayer(@RequestBody List<PlayerGolfScoreEntrys> scorePlayerEntrys, @AuthenticationPrincipal OidcUser principal) throws Exception {
+		//checkPrincipal(principal);
+		playerService.addEventPlayer(scorePlayerEntrys);
+		//System.out.println("pList ======  "+scoreList.size());
+		
+		return new ResponseEntity<Object>("successful", HttpStatus.OK); 
+	}
 	
 }

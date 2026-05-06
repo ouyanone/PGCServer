@@ -15,7 +15,12 @@ public interface PlayerScoreRepository extends CrudRepository<PlayerScore, Long>
 	@Query("SELECT p FROM PlayerScore p WHERE p.player.id=?1 ORDER BY p.scoreDate DESC LIMIT 3")
 	List<PlayerScore> getLast3Records(Long playerId);
 	
-
-	//List<ScoreStatistic> getScoreStatistics();
+	
+	
+	
+	@Query("SELECT p FROM PlayerScore p WHERE p.tee.event.id=?1 ORDER BY p.score")
+	List<PlayerScore> getPlayerScoreForEvent(Long eventId);
+	
+	List<PlayerScore>  findByTeeId(Long id);
 	
 }

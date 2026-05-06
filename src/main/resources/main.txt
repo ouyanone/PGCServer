@@ -1,0 +1,5 @@
+--update current_handicap to player's handicat
+update pgc.player_score as ps, pgc.player as player
+set ps.current_handicap = player.pgc_handicap 
+where player.id = ps.player_id 
+and tee in 

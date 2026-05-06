@@ -18,4 +18,6 @@ public interface EventRepository extends CrudRepository<Event, Long>{
 	
 	Iterable<Event> findFirst3ByStatusOrderByEventDateDesc(String status);
 
+	Event findFirstByStatus(String string);
+
 }

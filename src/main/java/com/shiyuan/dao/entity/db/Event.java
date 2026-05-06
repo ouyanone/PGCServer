@@ -127,6 +127,13 @@ public class Event {
 		this.eventDate = eventDate;
 	}
 
+	@Override
+	public String toString() {
+		return "Event [id=" + id + ", eventName=" + eventName + ", eventDesc=" + eventDesc + ", eventDate=" + eventDate
+				+ ", eventStory=" + eventStory + ", status=" + status + ", course=" + course + ", season=" + season
+				+ ", player=" + player + ", teeList=" + teeList + "]";
+	}
+
 	public String getStatus() {
 		return status;
 	}

@@ -4,10 +4,14 @@ import java.util.List;
 
 import com.shiyuan.dao.entity.EventGroup;
 import com.shiyuan.dao.entity.GhinUser;
+import com.shiyuan.dao.entity.PlayerGolfScore;
+import com.shiyuan.dao.entity.PlayerGolfScoreEntrys;
 import com.shiyuan.dao.entity.db.Donation;
 import com.shiyuan.dao.entity.db.Event;
 import com.shiyuan.dao.entity.db.EventUser;
 import com.shiyuan.dao.entity.db.Player;
+import com.shiyuan.dao.entity.db.PlayerScore;
+import com.shiyuan.dao.entity.db.Reward;
 import com.shiyuan.dao.entity.db.ScoreStatistic;
 
 public interface PlayerService {
@@ -39,6 +43,13 @@ public interface PlayerService {
 
 	List<EventUser> onboardEventUser(String eventId, List<EventUser> eventUsers);
 
+	List<Reward> findRewardForEvent(Long id);
+	
+	List<PlayerScore> findPlayerScoreForEvent(Long eventId);
+
+	void submitPlayerScore(List<PlayerGolfScore> scores);
+
+	void addEventPlayer(List<PlayerGolfScoreEntrys> scorePlayerEntrys);
 	
 
 }

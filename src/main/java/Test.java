@@ -5,6 +5,12 @@ public class Test {
 	public static void main(String[] args) {
 		System.out.println("test it");
 		
+		double rt = 113.0 / 135.0;
+		System.out.println("rt="+rt);
+		
+		String a="+2";
+		Integer i = Integer.valueOf(a);
+		System.out.println("i="+i);
 		
 		Function<Double, Double> x2 = (value) -> value*2;
 		Function<Double, Double> x4 = (value) -> value*4;

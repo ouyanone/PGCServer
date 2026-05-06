@@ -38,9 +38,11 @@ public class Tee {
 	@Column(name = "tee_time")
 	private String teeTime;
 	
-	@ManyToOne
-	@JoinColumn(name="course")
-	private Course course;
+	/*
+	 * @ManyToOne
+	 * 
+	 * @JoinColumn(name="course") private Course course;
+	 */
 	
 	@JsonIgnore
 	@ManyToOne
@@ -49,8 +51,9 @@ public class Tee {
 	private Event event;
 	
 	
-	@OneToMany(mappedBy="tee", cascade=CascadeType.ALL, orphanRemoval=true, fetch=FetchType.EAGER)
-	private List<TeeTeamXref> teeTeamXrefList;
+	
+	@OneToMany(mappedBy = "tee", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+	private List<PlayerScore> playerScoreList;
 
 	public Long getId() {
 		return id;
@@ -84,14 +87,11 @@ public class Tee {
 		this.teeStroy = teeStroy;
 	}
 
-	public Course getCourse() {
-		return course;
-	}
-
-	public void setCourse(Course course) {
-		this.course = course;
-	}
-
+	/*
+	 * public Course getCourse() { return course; }
+	 * 
+	 * public void setCourse(Course course) { this.course = course; }
+	 */
 	public Event getEvent() {
 		return event;
 	}
@@ -100,14 +100,12 @@ public class Tee {
 		this.event = event;
 	}
 
-	public List<TeeTeamXref> getTeeTeamXrefList() {
-		return teeTeamXrefList;
-	}
-
-	public void setTeeTeamXrefList(List<TeeTeamXref> teeTeamXrefList) {
-		this.teeTeamXrefList = teeTeamXrefList;
-	}
-
+	/*
+	 * public List<TeeTeamXref> getTeeTeamXrefList() { return teeTeamXrefList; }
+	 * 
+	 * public void setTeeTeamXrefList(List<TeeTeamXref> teeTeamXrefList) {
+	 * this.teeTeamXrefList = teeTeamXrefList; }
+	 */
 	public String getTeeTime() {
 		return teeTime;
 	}
@@ -116,10 +114,20 @@ public class Tee {
 		this.teeTime = teeTime;
 	}
 
+
+
+	public List<PlayerScore> getPlayerScoreList() {
+		return playerScoreList;
+	}
+
+	public void setPlayerScoreList(List<PlayerScore> playerScoreList) {
+		this.playerScoreList = playerScoreList;
+	}
+
 	@Override
 	public String toString() {
 		return "Tee [id=" + id + ", teeName=" + teeName + ", teeDesc=" + teeDesc + ", teeStroy=" + teeStroy
-				+ ", course=" + course  +"]";
+				  +"]";
 	}
 	
 }
