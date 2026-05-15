@@ -1,5 +1,6 @@
 package com.shiyuan.dao.entity.db;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -7,6 +8,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Entity
 @Table(name = "Player")
 public class Player {
@@ -71,6 +73,9 @@ public class Player {
 
 	@Column(name = "level")
 	private int level=0;
+
+	@Column(name = "pgc_points")
+	private Integer pgcPoints;
 	
 	
 	
@@ -217,6 +222,14 @@ public class Player {
 
 	public void setIsActive(Boolean isActive) {
 		this.isActive = isActive;
+	}
+
+	public Integer getPgcPoints() {
+		return pgcPoints;
+	}
+
+	public void setPgcPoints(Integer pgcPoints) {
+		this.pgcPoints = pgcPoints;
 	}
 	
 	@Override

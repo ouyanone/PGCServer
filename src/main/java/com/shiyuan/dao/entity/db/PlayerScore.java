@@ -96,6 +96,9 @@ public class PlayerScore {
 	private Integer hole18;
 	
 	
+	@Column(name = "game_point")
+	private Integer gamePoint;
+
 	@Column(name = "net_score")
 	private Double netScore;
 	
@@ -195,6 +198,14 @@ public class PlayerScore {
 
 	public void setTee(Tee tee) {
 		this.tee = tee;
+	}
+
+	public Integer getGamePoint() {
+		return gamePoint;
+	}
+
+	public void setGamePoint(Integer gamePoint) {
+		this.gamePoint = gamePoint;
 	}
 
 	public Double getNetScore() {

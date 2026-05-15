@@ -1,9 +1,8 @@
 package com.shiyuan.dao.entity.db;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.List;
 
-import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -12,41 +11,28 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
 @Entity
-@Table(name = "Donation")
+@Table(name = "donation")
 public class Donation {
-	
+
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
 	@Column(name = "donation_name")
 	private String donationName;
-	
+
 	@Column(name = "donation_desc")
-	private String donationDesc;	
-	
+	private String donationDesc;
+
 	@Column(name = "donation_date")
 	private LocalDate donationDate;
-	
-	@Column(name ="donor")
-	private String donor;
-	
-	@Column(name = "cash")
-	private int cash;
-	
-	@Column(name = "worth")
-	private int worth;
-	
-	
-	@Column(name ="product")
-	private String product;
-	
-	@Column(name ="type")
-	private String type;
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "donation_player")
+	private Player player;
 
 	public Long getId() {
 		return id;
@@ -80,50 +66,22 @@ public class Donation {
 		this.donationDate = donationDate;
 	}
 
-	public String getDonor() {
-		return donor;
+	public Player getPlayer() {
+		return player;
 	}
 
-	public void setDonor(String donor) {
-		this.donor = donor;
+	public void setPlayer(Player player) {
+		this.player = player;
 	}
 
-	public int getCash() {
-		return cash;
+	@Column(name = "amount")
+	private BigDecimal amount;
+
+	public BigDecimal getAmount() {
+		return amount;
 	}
 
-	public void setCash(int cash) {
-		this.cash = cash;
+	public void setAmount(BigDecimal amount) {
+		this.amount = amount;
 	}
-
-	public int getWorth() {
-		return worth;
-	}
-
-	public void setWorth(int worth) {
-		this.worth = worth;
-	}
-
-	public String getProduct() {
-		return product;
-	}
-
-	public void setProduct(String product) {
-		this.product = product;
-	}
-
-	public String getType() {
-		return type;
-	}
-
-	public void setType(String type) {
-		this.type = type;
-	}
-	
-	
-	
-	
-	
-	
-
 }
