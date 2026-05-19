@@ -147,6 +147,15 @@ public class PointsServiceImpl implements PointsService {
                     }).collect(Collectors.toList());
 
             String courseName = event.getCourse() != null ? event.getCourse().getCourseName() : "";
+            Course course = event.getCourse();
+            Integer[] pars = course != null ? new Integer[]{
+                course.getHole1(),  course.getHole2(),  course.getHole3(),
+                course.getHole4(),  course.getHole5(),  course.getHole6(),
+                course.getHole7(),  course.getHole8(),  course.getHole9(),
+                course.getHole10(), course.getHole11(), course.getHole12(),
+                course.getHole13(), course.getHole14(), course.getHole15(),
+                course.getHole16(), course.getHole17(), course.getHole18()
+            } : new Integer[18];
 
             List<EventScoreDetail.RewardRow> rewardRows = rewardRepository.findRewardsByEventId(event.getId())
                     .stream().map(r -> {
@@ -159,7 +168,7 @@ public class PointsServiceImpl implements PointsService {
                     }).collect(Collectors.toList());
 
             return new EventScoreDetail(event.getId(), event.getEventName(),
-                    event.getEventDate(), courseName, rows, rewardRows);
+                    event.getEventDate(), courseName, pars, rows, rewardRows);
         }).collect(Collectors.toList());
     }
 }

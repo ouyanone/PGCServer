@@ -76,6 +76,9 @@ public class Player {
 
 	@Column(name = "pgc_points")
 	private Integer pgcPoints;
+
+	@Column(name = "gender")
+	private String gender;
 	
 	
 	
@@ -231,7 +234,15 @@ public class Player {
 	public void setPgcPoints(Integer pgcPoints) {
 		this.pgcPoints = pgcPoints;
 	}
-	
+
+	public String getGender() {
+		return gender;
+	}
+
+	public void setGender(String gender) {
+		this.gender = gender;
+	}
+
 	@Override
 	public String toString() {
 		return "Player [id=" + id + ", fName=" + fName + ", lName=" + lName + ", ghinNumber=" + ghinNumber + ", phone="

@@ -2,8 +2,6 @@ package com.shiyuan.dao.entity.db;
 
 import java.util.List;
 
-import org.hibernate.annotations.Cascade;
-
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.CascadeType;
@@ -46,7 +44,6 @@ public class Tee {
 	
 	@JsonIgnore
 	@ManyToOne
-	@Cascade(value={org.hibernate.annotations.CascadeType.ALL})
 	@JoinColumn(name="event_id")
 	private Event event;
 	

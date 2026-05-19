@@ -117,11 +117,47 @@ public class EventController extends BaseController {
         return ResponseEntity.ok(saved);
     }
 
+    @PutMapping(path = "/webapi/admin/events/{id}/status", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> updateEventStatus(@PathVariable Long id,
+                                                  @RequestBody java.util.Map<String, String> body,
+                                                  @AuthenticationPrincipal OidcUser principal) throws Exception {
+        checkPrincipal(principal);
+        Event event = eventService.getEventById(String.valueOf(id));
+        event.setStatus(body.get("status"));
+        eventService.saveEvent(event);
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping(path = "/webapi/courses", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<List<Course>> getAllCourses() {
         List<Course> list = new java.util.ArrayList<>();
         courseRepository.findAll().forEach(list::add);
         return ResponseEntity.ok(list);
+    }
+
+    @PostMapping(path = "/webapi/admin/courses", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Course> createCourse(@RequestBody Course course,
+                                               @AuthenticationPrincipal OidcUser principal) throws Exception {
+        checkPrincipal(principal);
+        course.setId(null);
+        return ResponseEntity.status(HttpStatus.CREATED).body(courseRepository.save(course));
+    }
+
+    @PutMapping(path = "/webapi/admin/courses/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Course> updateCourse(@PathVariable Long id,
+                                               @RequestBody Course course,
+                                               @AuthenticationPrincipal OidcUser principal) throws Exception {
+        checkPrincipal(principal);
+        course.setId(id);
+        return ResponseEntity.ok(courseRepository.save(course));
+    }
+
+    @DeleteMapping(path = "/webapi/admin/courses/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> deleteCourse(@PathVariable Long id,
+                                             @AuthenticationPrincipal OidcUser principal) throws Exception {
+        checkPrincipal(principal);
+        courseRepository.deleteById(id);
+        return ResponseEntity.ok().build();
     }
 
     @GetMapping(path = "/webapi/seasons", produces = MediaType.APPLICATION_JSON_VALUE)

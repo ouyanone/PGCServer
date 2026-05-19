@@ -9,15 +9,18 @@ public class EventScoreDetail {
     private String eventName;
     private LocalDate eventDate;
     private String courseName;
+    private Integer[] pars;
     private List<PlayerScoreRow> scores;
     private List<RewardRow> rewards;
 
     public EventScoreDetail(Long eventId, String eventName, LocalDate eventDate,
-                            String courseName, List<PlayerScoreRow> scores, List<RewardRow> rewards) {
+                            String courseName, Integer[] pars,
+                            List<PlayerScoreRow> scores, List<RewardRow> rewards) {
         this.eventId = eventId;
         this.eventName = eventName;
         this.eventDate = eventDate;
         this.courseName = courseName;
+        this.pars = pars;
         this.scores = scores;
         this.rewards = rewards;
     }
@@ -26,6 +29,7 @@ public class EventScoreDetail {
     public String getEventName() { return eventName; }
     public LocalDate getEventDate() { return eventDate; }
     public String getCourseName() { return courseName; }
+    public Integer[] getPars() { return pars; }
     public List<PlayerScoreRow> getScores() { return scores; }
     public List<RewardRow> getRewards() { return rewards; }
 

@@ -104,6 +104,8 @@ public class EventServiceImpl implements EventService {
         event.setId(null);
         event.setTeeList(null);
         event.setPlayer(null);
+        if (event.getEventDesc() == null) event.setEventDesc("");
+        if (event.getEventStory() == null) event.setEventStory("");
         event.setCourse(resolveCourse(event));
         event.setSeason(resolveSeason(event));
         return eventRepository.save(event);
