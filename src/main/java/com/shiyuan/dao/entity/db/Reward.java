@@ -1,7 +1,5 @@
 package com.shiyuan.dao.entity.db;
 
-import org.hibernate.annotations.Cascade;
-
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.Column;
@@ -29,16 +27,16 @@ public class Reward {
 	private String rewardStory;
 	@Column(name = "display_order")
 	private Integer displayOrder;
+	@Column(name = "reward_group")
+	private String rewardGroup;
 	
 	
-	@JsonIgnore
 	@ManyToOne
-	@Cascade(value={org.hibernate.annotations.CascadeType.ALL})
 	@JoinColumn(name="event_id")
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties({"teeList","player","season"})
 	private Event event;
-	
+
 	@ManyToOne
-	@Cascade(value={org.hibernate.annotations.CascadeType.ALL})
 	@JoinColumn(name="player_id")
 	private Player player;
 
@@ -97,6 +95,13 @@ public class Reward {
 	public void setDisplayOrder(Integer displayOrder) {
 		this.displayOrder = displayOrder;
 	}
-	
+
+	public String getRewardGroup() {
+		return rewardGroup;
+	}
+
+	public void setRewardGroup(String rewardGroup) {
+		this.rewardGroup = rewardGroup;
+	}
 
 }
