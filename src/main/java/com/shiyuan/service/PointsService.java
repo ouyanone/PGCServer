@@ -8,4 +8,6 @@ public interface PointsService {
     void calculateCurrentSeasonPoints();
     List<Player> getStandings();
     List<EventScoreDetail> getCurrentSeasonGameScores();
+    EventScoreDetail getEventScoreDetail(Long eventId);
+    List<EventScoreDetail> getTournamentScoreDetails(Long tournamentId);
 }

@@ -31,4 +31,16 @@ public class PointsController {
     public ResponseEntity<List<EventScoreDetail>> getGameScores() {
         return ResponseEntity.ok(pointsService.getCurrentSeasonGameScores());
     }
+
+    @GetMapping("/webapi/points/game-scores/event/{eventId}")
+    public ResponseEntity<EventScoreDetail> getEventScoreDetail(@PathVariable Long eventId) {
+        EventScoreDetail detail = pointsService.getEventScoreDetail(eventId);
+        if (detail == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(detail);
+    }
+
+    @GetMapping("/webapi/points/game-scores/tournament/{tournamentId}")
+    public ResponseEntity<List<EventScoreDetail>> getTournamentScoreDetails(@PathVariable Long tournamentId) {
+        return ResponseEntity.ok(pointsService.getTournamentScoreDetails(tournamentId));
+    }
 }

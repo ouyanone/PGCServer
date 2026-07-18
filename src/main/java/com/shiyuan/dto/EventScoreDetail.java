@@ -10,17 +10,24 @@ public class EventScoreDetail {
     private LocalDate eventDate;
     private String courseName;
     private Integer[] pars;
+    private Long tournamentId;
+    private String tournamentName;
+    private Integer tournamentTotalEvents;
     private List<PlayerScoreRow> scores;
     private List<RewardRow> rewards;
 
     public EventScoreDetail(Long eventId, String eventName, LocalDate eventDate,
                             String courseName, Integer[] pars,
+                            Long tournamentId, String tournamentName, Integer tournamentTotalEvents,
                             List<PlayerScoreRow> scores, List<RewardRow> rewards) {
         this.eventId = eventId;
         this.eventName = eventName;
         this.eventDate = eventDate;
         this.courseName = courseName;
         this.pars = pars;
+        this.tournamentId = tournamentId;
+        this.tournamentName = tournamentName;
+        this.tournamentTotalEvents = tournamentTotalEvents;
         this.scores = scores;
         this.rewards = rewards;
     }
@@ -30,6 +37,9 @@ public class EventScoreDetail {
     public LocalDate getEventDate() { return eventDate; }
     public String getCourseName() { return courseName; }
     public Integer[] getPars() { return pars; }
+    public Long getTournamentId() { return tournamentId; }
+    public String getTournamentName() { return tournamentName; }
+    public Integer getTournamentTotalEvents() { return tournamentTotalEvents; }
     public List<PlayerScoreRow> getScores() { return scores; }
     public List<RewardRow> getRewards() { return rewards; }
 
@@ -61,6 +71,9 @@ public class EventScoreDetail {
 
     public static class PlayerScoreRow {
         private String playerName;
+        private String gender;
+        private Double pgcHandicap;
+        private Double handicap;
         private Integer hole1, hole2, hole3, hole4, hole5, hole6, hole7, hole8, hole9;
         private Integer hole10, hole11, hole12, hole13, hole14, hole15, hole16, hole17, hole18;
         private Integer front9;
@@ -69,13 +82,16 @@ public class EventScoreDetail {
         private Double netScore;
         private Integer gamePoint;
 
-        public PlayerScoreRow(String playerName,
+        public PlayerScoreRow(String playerName, String gender, Double pgcHandicap, Double handicap,
                               Integer h1, Integer h2, Integer h3, Integer h4, Integer h5,
                               Integer h6, Integer h7, Integer h8, Integer h9,
                               Integer h10, Integer h11, Integer h12, Integer h13, Integer h14,
                               Integer h15, Integer h16, Integer h17, Integer h18,
                               Integer totalScore, Double netScore, Integer gamePoint) {
             this.playerName = playerName;
+            this.gender = gender;
+            this.pgcHandicap = pgcHandicap;
+            this.handicap = handicap;
             this.hole1 = h1; this.hole2 = h2; this.hole3 = h3;
             this.hole4 = h4; this.hole5 = h5; this.hole6 = h6;
             this.hole7 = h7; this.hole8 = h8; this.hole9 = h9;
@@ -96,6 +112,9 @@ public class EventScoreDetail {
         }
 
         public String getPlayerName() { return playerName; }
+        public String getGender() { return gender; }
+        public Double getPgcHandicap() { return pgcHandicap; }
+        public Double getHandicap() { return handicap; }
         public Integer getHole1() { return hole1; }
         public Integer getHole2() { return hole2; }
         public Integer getHole3() { return hole3; }

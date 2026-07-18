@@ -3,6 +3,7 @@ package com.shiyuan.dao.entity.db;
 import java.time.LocalDate;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -49,6 +50,11 @@ public class Event {
 	@ManyToOne
 	@JoinColumn(name="host_player")
 	private Player player;
+
+	@ManyToOne
+	@JoinColumn(name = "tournament_id")
+	@JsonIgnore
+	private Tournament tournament;
 	
 	@OneToMany(mappedBy="event", cascade=CascadeType.ALL, orphanRemoval=true, fetch=FetchType.EAGER)
 	private List<Tee> teeList;
@@ -141,6 +147,12 @@ public class Event {
 	public void setStatus(String status) {
 		this.status = status;
 	}
+
+	public Tournament getTournament() { return tournament; }
+	public void setTournament(Tournament tournament) { this.tournament = tournament; }
+
+	public Long getTournamentId() { return tournament != null ? tournament.getId() : null; }
+	public String getTournamentName() { return tournament != null ? tournament.getName() : null; }
 
 
 	

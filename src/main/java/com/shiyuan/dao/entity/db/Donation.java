@@ -24,7 +24,7 @@ public class Donation {
 	@Column(name = "donation_name")
 	private String donationName;
 
-	@Column(name = "donation_desc")
+	@Column(name = "donation_desc", nullable = true)
 	private String donationDesc;
 
 	@Column(name = "donation_date")

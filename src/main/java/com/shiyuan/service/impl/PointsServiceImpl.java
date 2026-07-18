@@ -124,51 +124,78 @@ public class PointsServiceImpl implements PointsService {
                 currentSeason.getId(), List.of("FINISHED", "CLOSED"));
 
         events.sort(Comparator.comparing(Event::getEventDate).reversed());
+        return events.stream().map(this::buildEventScoreDetail).collect(Collectors.toList());
+    }
 
-        return events.stream().map(event -> {
-            List<PlayerScore> scores = playerScoreRepository.getPlayerScoreForEvent(event.getId());
-            List<EventScoreDetail.PlayerScoreRow> rows = scores.stream()
-                    .filter(s -> s.getScore() != null && s.getScore() > 0)
-                    .sorted(Comparator.comparingInt(PlayerScore::getScore)
-                            .thenComparing(Comparator.comparingInt(
-                                    (PlayerScore s) -> s.getGamePoint() != null ? s.getGamePoint() : 0).reversed()))
-                    .map(s -> {
-                        String name = s.getPlayer().getfName() + " " + s.getPlayer().getlName();
-                        return new EventScoreDetail.PlayerScoreRow(
-                                name,
-                                s.getHole1(), s.getHole2(), s.getHole3(),
-                                s.getHole4(), s.getHole5(), s.getHole6(),
-                                s.getHole7(), s.getHole8(), s.getHole9(),
-                                s.getHole10(), s.getHole11(), s.getHole12(),
-                                s.getHole13(), s.getHole14(), s.getHole15(),
-                                s.getHole16(), s.getHole17(), s.getHole18(),
-                                s.getScore(), s.getNetScore(), s.getGamePoint()
-                        );
-                    }).collect(Collectors.toList());
+    @Override
+    public EventScoreDetail getEventScoreDetail(Long eventId) {
+        Event event = eventRepository.findById(eventId.longValue());
+        if (event == null) return null;
+        return buildEventScoreDetail(event);
+    }
 
-            String courseName = event.getCourse() != null ? event.getCourse().getCourseName() : "";
-            Course course = event.getCourse();
-            Integer[] pars = course != null ? new Integer[]{
-                course.getHole1(),  course.getHole2(),  course.getHole3(),
-                course.getHole4(),  course.getHole5(),  course.getHole6(),
-                course.getHole7(),  course.getHole8(),  course.getHole9(),
-                course.getHole10(), course.getHole11(), course.getHole12(),
-                course.getHole13(), course.getHole14(), course.getHole15(),
-                course.getHole16(), course.getHole17(), course.getHole18()
-            } : new Integer[18];
+    @Override
+    public List<EventScoreDetail> getTournamentScoreDetails(Long tournamentId) {
+        List<Event> all = (List<Event>) eventRepository.findAllByOrderByEventDateDesc();
+        return all.stream()
+                .filter(e -> tournamentId.equals(e.getTournamentId())
+                        && ("FINISHED".equals(e.getStatus()) || "CLOSED".equals(e.getStatus())))
+                .sorted(Comparator.comparing(Event::getEventDate).reversed())
+                .map(this::buildEventScoreDetail)
+                .collect(Collectors.toList());
+    }
 
-            List<EventScoreDetail.RewardRow> rewardRows = rewardRepository.findRewardsByEventId(event.getId())
-                    .stream().map(r -> {
-                        String playerName = r.getPlayer() != null
-                                ? r.getPlayer().getfName() + " " + r.getPlayer().getlName()
-                                : "";
-                        return new EventScoreDetail.RewardRow(
-                                r.getRewardName(), r.getRewardDesc(), r.getRewardStory(),
-                                playerName, r.getDisplayOrder(), r.getRewardGroup());
-                    }).collect(Collectors.toList());
+    private EventScoreDetail buildEventScoreDetail(Event event) {
+        List<PlayerScore> scores = playerScoreRepository.getPlayerScoreForEvent(event.getId());
+        List<EventScoreDetail.PlayerScoreRow> rows = scores.stream()
+                .filter(s -> s.getScore() != null && s.getScore() > 0)
+                .sorted(Comparator.comparingInt(PlayerScore::getScore)
+                        .thenComparing(Comparator.comparingInt(
+                                (PlayerScore s) -> s.getGamePoint() != null ? s.getGamePoint() : 0).reversed()))
+                .map(s -> {
+                    String name = s.getPlayer().getfName() + " " + s.getPlayer().getlName();
+                    return new EventScoreDetail.PlayerScoreRow(
+                            name,
+                            s.getPlayer().getGender(),
+                            s.getPlayer().getPgcHandicap(),
+                            s.getPlayer().getHandicap(),
+                            s.getHole1(), s.getHole2(), s.getHole3(),
+                            s.getHole4(), s.getHole5(), s.getHole6(),
+                            s.getHole7(), s.getHole8(), s.getHole9(),
+                            s.getHole10(), s.getHole11(), s.getHole12(),
+                            s.getHole13(), s.getHole14(), s.getHole15(),
+                            s.getHole16(), s.getHole17(), s.getHole18(),
+                            s.getScore(), s.getNetScore(), s.getGamePoint()
+                    );
+                }).collect(Collectors.toList());
 
-            return new EventScoreDetail(event.getId(), event.getEventName(),
-                    event.getEventDate(), courseName, pars, rows, rewardRows);
-        }).collect(Collectors.toList());
+        String courseName = event.getCourse() != null ? event.getCourse().getCourseName() : "";
+        Course course = event.getCourse();
+        Integer[] pars = course != null ? new Integer[]{
+            course.getHole1(),  course.getHole2(),  course.getHole3(),
+            course.getHole4(),  course.getHole5(),  course.getHole6(),
+            course.getHole7(),  course.getHole8(),  course.getHole9(),
+            course.getHole10(), course.getHole11(), course.getHole12(),
+            course.getHole13(), course.getHole14(), course.getHole15(),
+            course.getHole16(), course.getHole17(), course.getHole18()
+        } : new Integer[18];
+
+        List<EventScoreDetail.RewardRow> rewardRows = rewardRepository.findRewardsByEventId(event.getId())
+                .stream().map(r -> {
+                    String playerName = r.getPlayer() != null
+                            ? r.getPlayer().getfName() + " " + r.getPlayer().getlName()
+                            : "";
+                    return new EventScoreDetail.RewardRow(
+                            r.getRewardName(), r.getRewardDesc(), r.getRewardStory(),
+                            playerName, r.getDisplayOrder(), r.getRewardGroup());
+                }).collect(Collectors.toList());
+
+        int tournamentTotalEvents = (event.getTournament() != null && event.getTournament().getEvents() != null)
+                ? event.getTournament().getEvents().size() : 0;
+
+        return new EventScoreDetail(event.getId(), event.getEventName(),
+                event.getEventDate(), courseName, pars,
+                event.getTournamentId(), event.getTournamentName(), tournamentTotalEvents,
+                rows, rewardRows);
     }
 }
