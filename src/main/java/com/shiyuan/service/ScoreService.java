@@ -10,7 +10,7 @@ public interface ScoreService {
 
     List<PlayerScore> findPlayerScoreForEvent(Long eventId);
 
-    void submitPlayerScore(List<PlayerGolfScore> scores);
+    void submitPlayerScore(List<PlayerGolfScore> scores, Long eventId);
 
     void addEventPlayer(List<PlayerGolfScoreEntrys> scorePlayerEntrys);
 }

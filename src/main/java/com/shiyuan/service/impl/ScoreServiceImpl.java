@@ -36,11 +36,17 @@ public class ScoreServiceImpl implements ScoreService {
     }
 
     @Override
-    public void submitPlayerScore(List<PlayerGolfScore> scores) {
-        Event currentInitEvent = eventRepository.findFirstByStatus("INIT");
-        System.out.println("currentInitEvent::" + currentInitEvent);
+    public void submitPlayerScore(List<PlayerGolfScore> scores, Long eventId) {
+        // Upload scores to the caller-selected event; fall back to the current
+        // INIT event only when no event id was provided (backwards compatible).
+        Long targetEventId = eventId;
+        if (targetEventId == null) {
+            Event currentInitEvent = eventRepository.findFirstByStatus("INIT");
+            targetEventId = currentInitEvent != null ? currentInitEvent.getId() : null;
+        }
+        System.out.println("submitPlayerScore targetEventId::" + targetEventId);
 
-        List<PlayerScore> psEntityList = playerScoreRepository.getPlayerScoreForEvent(currentInitEvent.getId());
+        List<PlayerScore> psEntityList = playerScoreRepository.getPlayerScoreForEvent(targetEventId);
         int i = 0;
         for (PlayerGolfScore ps : scores) {
             i++;

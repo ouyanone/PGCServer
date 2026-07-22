@@ -45,8 +45,10 @@ public class ScoreController extends BaseController {
     }
 
     @PostMapping(path = "/webapi/event/scores", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Object> submitEventScore(@RequestBody List<PlayerGolfScore> scores, @AuthenticationPrincipal OidcUser principal) throws Exception {
-        scoreService.submitPlayerScore(scores);
+    public ResponseEntity<Object> submitEventScore(@RequestBody List<PlayerGolfScore> scores,
+                                                   @RequestParam(required = false) Long eventId,
+                                                   @AuthenticationPrincipal OidcUser principal) throws Exception {
+        scoreService.submitPlayerScore(scores, eventId);
         return new ResponseEntity<Object>("successful", HttpStatus.OK);
     }
 
