@@ -8,11 +8,16 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import com.shiyuan.dao.entity.EventGroup;
 import com.shiyuan.dao.entity.db.Event;
+import com.shiyuan.dao.entity.db.Player;
+import com.shiyuan.dao.entity.db.PlayerScore;
 import com.shiyuan.dao.entity.db.Tee;
 import com.shiyuan.dao.repository.CourseRepository;
 import com.shiyuan.dao.repository.EventRepository;
+import com.shiyuan.dao.repository.PlayerScoreRepository;
 import com.shiyuan.dao.repository.SeasonRepository;
 import com.shiyuan.dao.repository.TeamRepository;
 import com.shiyuan.dao.repository.TeeRepository;
@@ -35,6 +40,9 @@ public class EventServiceImpl implements EventService {
 
     @Autowired
     TeeRepository teeRepository;
+
+    @Autowired
+    PlayerScoreRepository playerScoreRepository;
 
     @Override
     public void createEvent(EventGroup eventGroup) {
@@ -109,6 +117,20 @@ public class EventServiceImpl implements EventService {
         event.setCourse(resolveCourse(event));
         event.setSeason(resolveSeason(event));
         return eventRepository.save(event);
+    }
+
+    @Override
+    @Transactional
+    public void copyPgcHandicapToScores(Long eventId) {
+        List<PlayerScore> scores = playerScoreRepository.getPlayerScoreForEvent(eventId);
+        for (PlayerScore ps : scores) {
+            Player player = ps.getPlayer();
+            if (player != null) {
+                // Copy as-is (may be null) from the player's current pgc_handicap
+                ps.setEntryPGCHandicap(player.getPgcHandicap());
+            }
+        }
+        playerScoreRepository.saveAll(scores);
     }
 
     private com.shiyuan.dao.entity.db.Course resolveCourse(Event event) {

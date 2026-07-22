@@ -123,8 +123,14 @@ public class EventController extends BaseController {
                                                   @AuthenticationPrincipal OidcUser principal) throws Exception {
         checkPrincipal(principal);
         Event event = eventService.getEventById(String.valueOf(id));
-        event.setStatus(body.get("status"));
+        String newStatus = body.get("status");
+        event.setStatus(newStatus);
         eventService.saveEvent(event);
+        // On any transition into STARTED, snapshot each player's current pgc_handicap
+        // into their player_score row (entry_pgc_handicap).
+        if ("STARTED".equalsIgnoreCase(newStatus)) {
+            eventService.copyPgcHandicapToScores(id);
+        }
         return ResponseEntity.ok().build();
     }
 
