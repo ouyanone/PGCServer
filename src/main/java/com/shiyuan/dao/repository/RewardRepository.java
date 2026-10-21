@@ -2,6 +2,7 @@ package com.shiyuan.dao.repository;
 
 import java.util.List;
 
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.repository.query.Param;
@@ -19,4 +20,9 @@ public interface RewardRepository extends CrudRepository<Reward, Long>{
 
     @Query("SELECT r FROM Reward r JOIN r.event e ORDER BY e.eventDate DESC, r.displayOrder ASC")
     List<Reward> findAllOrderByEventDateDesc();
+
+    /** Rewards are not cascaded from Event, so deleting an event must clear them first. */
+    @Modifying
+    @Query("DELETE FROM Reward r WHERE r.event.id = :eventId")
+    void deleteByEventId(@Param("eventId") Long eventId);
 }
