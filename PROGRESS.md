@@ -1251,3 +1251,28 @@ hidden rather than failing the request — one bad course should not blank out a
   the new component.
 
 Not deployed, not committed.
+
+### STEP45b — score history scaled up for desktop ✅ (2026-10-21)
+
+Reported: the scorecard reads fine on mobile but too small on a computer.
+
+**Cause:** the stylesheet was written mobile-first and its only media query
+(`max-width: 600px`) shrinks things *further* — nothing ever scaled up. The dialog was also
+capped at 860px, leaving most of a wide screen empty.
+
+**Change (PGCUI only):** dialog 860px → 1180px (`maxWidth: 96vw` still caps small screens);
+at ≥900px larger table text and padding, a `min-width` on hole columns so they cannot collapse
+to a single digit, taller chart with unrotated labels, bigger tiles and rows, and the **two
+nines side by side** instead of stacked so the whole card reads at once; a further step up at
+≥1250px. Base styles and the `max-width: 600px` query untouched, so mobile is unchanged.
+
+**Verification:** build exit 0, 0 errors, warnings still at the baseline 9 with none in the
+component. Deployed (`d61aaa38…`, old WAR archived as `ROOT.war.10212026_2033`); confirmed live
+that the served bundle contains both media queries and the side-by-side rule, and the
+score-history endpoint still returns 200.
+
+Note: an initial check for the media query reported 0 matches — the grep pattern omitted a
+space the minifier keeps (`@media (min-width: 900px){`). The CSS was present all along. Worth
+remembering when grepping minified CSS.
+
+Committed and pushed: PGCUI `f9453884`.
