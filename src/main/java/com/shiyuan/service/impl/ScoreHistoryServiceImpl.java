@@ -2,6 +2,8 @@ package com.shiyuan.service.impl;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.sql.Date;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,8 +15,10 @@ import com.shiyuan.dao.entity.db.Course;
 import com.shiyuan.dao.entity.db.Event;
 import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.PlayerScore;
+import com.shiyuan.dao.entity.db.Season;
 import com.shiyuan.dao.repository.PlayerRepository;
 import com.shiyuan.dao.repository.PlayerScoreRepository;
+import com.shiyuan.dao.repository.SeasonRepository;
 import com.shiyuan.dto.PlayerScoreHistory;
 import com.shiyuan.service.PlayerNotFoundException;
 import com.shiyuan.service.ScoreHistoryService;
@@ -33,6 +37,9 @@ public class ScoreHistoryServiceImpl implements ScoreHistoryService {
 
     @Autowired
     private PlayerRepository playerRepository;
+
+    @Autowired
+    private SeasonRepository seasonRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -54,6 +61,15 @@ public class ScoreHistoryServiceImpl implements ScoreHistoryService {
         history.setPgcHandicap(player.getPgcHandicap());
         history.setHandicap(player.getHandicap());
         history.setRounds(rounds);
+
+        // Seasons are calendar-year rows; outside any of them there is no current season
+        // and the view falls back to showing everything.
+        Season current = seasonRepository.findCurrentSeason(Date.valueOf(LocalDate.now()));
+        if (current != null) {
+            history.setCurrentSeasonId(current.getId());
+            history.setCurrentSeasonName(current.getSeasonName());
+        }
+
         summarise(history, rounds);
         return history;
     }
@@ -91,6 +107,10 @@ public class ScoreHistoryServiceImpl implements ScoreHistoryService {
         if (course != null) {
             r.setClubName(course.getClubName());
             r.setCourseName(course.getCourseName());
+        }
+        if (event != null && event.getSeason() != null) {
+            r.setSeasonId(event.getSeason().getId());
+            r.setSeasonName(event.getSeason().getSeasonName());
         }
 
         r.setGross(ps.getScore());

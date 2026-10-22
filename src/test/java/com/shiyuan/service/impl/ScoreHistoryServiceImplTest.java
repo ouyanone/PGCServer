@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -25,9 +26,11 @@ import com.shiyuan.dao.entity.db.Course;
 import com.shiyuan.dao.entity.db.Event;
 import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.PlayerScore;
+import com.shiyuan.dao.entity.db.Season;
 import com.shiyuan.dao.entity.db.Tee;
 import com.shiyuan.dao.repository.PlayerRepository;
 import com.shiyuan.dao.repository.PlayerScoreRepository;
+import com.shiyuan.dao.repository.SeasonRepository;
 import com.shiyuan.dto.PlayerScoreHistory;
 import com.shiyuan.service.PlayerNotFoundException;
 
@@ -52,6 +55,9 @@ class ScoreHistoryServiceImplTest {
 
     @Mock
     PlayerRepository playerRepository;
+
+    @Mock
+    SeasonRepository seasonRepository;
 
     @InjectMocks
     ScoreHistoryServiceImpl service;
@@ -84,12 +90,24 @@ class ScoreHistoryServiceImplTest {
         return c;
     }
 
+    private Season season(long id, String name) {
+        Season s = new Season();
+        s.setId(id);
+        s.setSeasonName(name);
+        return s;
+    }
+
     private PlayerScore round(String date, int gross, int[] offsets, Course course) {
+        return round(date, gross, offsets, course, season(3L, "2026"));
+    }
+
+    private PlayerScore round(String date, int gross, int[] offsets, Course course, Season season) {
         Event e = new Event();
         e.setId(1155L);
         e.setEventName("2026 PGC Maryland Crab Cup Round 2");
         e.setEventDate(LocalDate.parse(date));
         e.setCourse(course);
+        e.setSeason(season);
 
         Tee t = new Tee();
         t.setEvent(e);
@@ -113,6 +131,7 @@ class ScoreHistoryServiceImplTest {
     private void givenRounds(List<PlayerScore> rounds) {
         when(playerRepository.findById(PLAYER_ID)).thenReturn(Optional.of(player()));
         when(playerScoreRepository.findHistoryForPlayer(eq(PLAYER_ID), anyList())).thenReturn(rounds);
+        when(seasonRepository.findCurrentSeason(any())).thenReturn(season(3L, "2026"));
     }
 
     // ── positive ─────────────────────────────────────────────────────────────
@@ -235,5 +254,56 @@ class ScoreHistoryServiceImplTest {
 
         assertEquals(1, r.getHoles()[0]);
         assertNull(r.getPars());
+    }
+
+    // ── season tagging, for the current-season / all-time toggle ─────────────
+
+    @Test
+    void tagsEachRoundWithItsOwnSeason() {
+        Course c = course(LIGHTHOUSE_PAR);
+        givenRounds(List.of(
+                round("2026-09-19", 86, REAL_OFFSETS, c, season(3L, "2026")),
+                round("2025-07-27", 92, REAL_OFFSETS, c, season(2L, "PGC 2025"))));
+
+        PlayerScoreHistory h = service.getHistory(PLAYER_ID);
+
+        assertEquals(3L, h.getRounds().get(0).getSeasonId());
+        assertEquals("2026", h.getRounds().get(0).getSeasonName());
+        assertEquals(2L, h.getRounds().get(1).getSeasonId());
+        assertEquals("PGC 2025", h.getRounds().get(1).getSeasonName());
+    }
+
+    @Test
+    void reportsWhichSeasonIsCurrentSoTheViewCanDefaultToIt() {
+        givenRounds(List.of(round("2026-09-19", 86, REAL_OFFSETS, course(LIGHTHOUSE_PAR))));
+
+        PlayerScoreHistory h = service.getHistory(PLAYER_ID);
+
+        assertEquals(3L, h.getCurrentSeasonId());
+        assertEquals("2026", h.getCurrentSeasonName());
+    }
+
+    @Test
+    void outsideAnyConfiguredSeasonThereIsNoCurrentSeason() {
+        // Seasons are calendar years; once the year rolls past the last configured one
+        // there is no current season and the view has to fall back to all time.
+        givenRounds(List.of(round("2026-09-19", 86, REAL_OFFSETS, course(LIGHTHOUSE_PAR))));
+        when(seasonRepository.findCurrentSeason(any())).thenReturn(null);
+
+        PlayerScoreHistory h = service.getHistory(PLAYER_ID);
+
+        assertNull(h.getCurrentSeasonId());
+        assertNull(h.getCurrentSeasonName());
+        assertEquals(1, h.getRounds().size(), "rounds are still returned");
+    }
+
+    @Test
+    void aRoundWithNoSeasonIsStillListed() {
+        givenRounds(List.of(round("2026-09-19", 86, REAL_OFFSETS, course(LIGHTHOUSE_PAR), null)));
+
+        PlayerScoreHistory.Round r = service.getHistory(PLAYER_ID).getRounds().get(0);
+
+        assertNull(r.getSeasonId());
+        assertEquals(86, r.getGross());
     }
 }

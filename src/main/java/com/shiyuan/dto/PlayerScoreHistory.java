@@ -24,6 +24,10 @@ public class PlayerScoreHistory {
     private Double averageGross;
     private Integer latestGross;
 
+    /** Which season is current today, so the view can default to it. Null off-season. */
+    private Long currentSeasonId;
+    private String currentSeasonName;
+
     private List<Round> rounds;
 
     public PlayerScoreHistory() {
@@ -56,6 +60,12 @@ public class PlayerScoreHistory {
     public Integer getLatestGross() { return latestGross; }
     public void setLatestGross(Integer v) { latestGross = v; }
 
+    public Long getCurrentSeasonId() { return currentSeasonId; }
+    public void setCurrentSeasonId(Long v) { currentSeasonId = v; }
+
+    public String getCurrentSeasonName() { return currentSeasonName; }
+    public void setCurrentSeasonName(String v) { currentSeasonName = v; }
+
     public List<Round> getRounds() { return rounds; }
     public void setRounds(List<Round> v) { rounds = v; }
 
@@ -68,6 +78,8 @@ public class PlayerScoreHistory {
         private String clubName;
         private String courseName;
         private Integer coursePar;
+        private Long seasonId;
+        private String seasonName;
 
         private Integer gross;
         private Double netScore;
@@ -103,6 +115,12 @@ public class PlayerScoreHistory {
 
         public Integer getCoursePar() { return coursePar; }
         public void setCoursePar(Integer v) { coursePar = v; }
+
+        public Long getSeasonId() { return seasonId; }
+        public void setSeasonId(Long v) { seasonId = v; }
+
+        public String getSeasonName() { return seasonName; }
+        public void setSeasonName(String v) { seasonName = v; }
 
         public Integer getGross() { return gross; }
         public void setGross(Integer v) { gross = v; }
