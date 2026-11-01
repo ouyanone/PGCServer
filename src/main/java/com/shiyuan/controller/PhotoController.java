@@ -8,6 +8,7 @@ import net.coobird.thumbnailator.Thumbnails;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -37,13 +38,26 @@ public class PhotoController extends BaseController {
     @Autowired
     private EventRepository eventRepository;
 
-    /** GET /webapi/photos/random?count=N — random photo thumbnails for carousel */
-    @GetMapping(path = "/webapi/photos/random", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<List<Map<String, Object>>> getRandomPhotos(
-            @RequestParam(defaultValue = "20") int count) {
-        List<EventPhoto> all = photoRepository.findAll();
-        Collections.shuffle(all);
-        List<Map<String, Object>> result = all.stream().limit(count).map(p -> {
+    /** Default number of photos on the home carousel. */
+    private static final int CAROUSEL_PHOTO_COUNT = 15;
+
+    /**
+     * GET /webapi/photos/latest?count=N — newest photo thumbnails for the home carousel.
+     *
+     * "Latest" means the most recent EVENTS, not the most recent uploads — photos from an old
+     * outing uploaded late should not jump to the front of the carousel.
+     *
+     * Ordering and limiting happen in the database: the previous implementation loaded every
+     * photo with findAll() and shuffled it in memory, which both returned a random sample
+     * rather than recent ones and grew more wasteful with every upload.
+     */
+    @GetMapping(path = "/webapi/photos/latest", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<Map<String, Object>>> getLatestPhotos(
+            @RequestParam(defaultValue = "" + CAROUSEL_PHOTO_COUNT) int count) {
+        int limit = count > 0 ? count : CAROUSEL_PHOTO_COUNT;
+        List<EventPhoto> latest =
+                photoRepository.findLatestByEventDate(PageRequest.of(0, limit));
+        List<Map<String, Object>> result = latest.stream().map(p -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", p.getId());
             String thumb = p.getThumbnailName() != null ? p.getThumbnailName() : p.getFileName();

@@ -38,7 +38,14 @@ public class PlayerServiceImpl implements PlayerService {
 
     @Override
     public List<Player> getAllPlayers() {
-        Iterable<Player> pi = playerRepository.findByIsActive(true);
+        return getAllPlayers(false);
+    }
+
+    @Override
+    public List<Player> getAllPlayers(boolean includeInactive) {
+        Iterable<Player> pi = includeInactive
+                ? playerRepository.findAll()
+                : playerRepository.findByIsActive(true);
         List<Player> pList = new ArrayList<Player>();
         pi.forEach(pList::add);
         return pList;

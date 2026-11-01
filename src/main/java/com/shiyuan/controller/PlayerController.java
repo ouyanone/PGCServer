@@ -17,6 +17,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,6 +29,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.shiyuan.dao.entity.AccessToken;
 import com.shiyuan.dao.entity.db.Player;
+import com.shiyuan.dto.PlayerScoreHistory;
+import com.shiyuan.service.PlayerNotFoundException;
+import com.shiyuan.service.ScoreHistoryService;
 import com.shiyuan.service.PlayerService;
 
 @RestController
@@ -36,22 +40,39 @@ public class PlayerController extends BaseController {
     private final static Logger log = LoggerFactory.getLogger(PlayerController.class);
 
     @Autowired
+    ScoreHistoryService scoreHistoryService;
+
+    @Autowired
     PlayerService playerService;
 
     String UPLOAD_DIR = "/myApp/apache-tomcat-10.1.30/photo";
 
     @GetMapping(path = "/webapi/players", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Object> getAllPlayers(@AuthenticationPrincipal OidcUser principal) throws Exception {
-        List<Player> pList = playerService.getAllPlayers();
-        pList.forEach((p) -> System.out.println(p));
-        System.out.println("pList ======  " + pList.size());
-        return new ResponseEntity<Object>(pList, HttpStatus.OK);
+    public ResponseEntity<Object> getAllPlayers(
+            @RequestParam(name = "includeInactive", defaultValue = "false") boolean includeInactive,
+            @AuthenticationPrincipal OidcUser principal) throws Exception {
+        return new ResponseEntity<Object>(playerService.getAllPlayers(includeInactive), HttpStatus.OK);
     }
 
     @GetMapping(path = "/webapi/players/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Object> getPlayerbyId(@PathVariable("id") String id) throws Exception {
         Player p = playerService.getPlayerById(id);
         return new ResponseEntity<Object>(p, HttpStatus.OK);
+    }
+
+    /**
+     * GET /webapi/players/{id}/score-history — every round this player has posted.
+     * Public: score information is public on this site, so no sign-in is required.
+     */
+    @GetMapping(path = "/webapi/players/{id}/score-history", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<PlayerScoreHistory> getScoreHistory(@PathVariable("id") Long id) {
+        return ResponseEntity.ok(scoreHistoryService.getHistory(id));
+    }
+
+    /** An unknown player is a 404, not an empty body or a 500. */
+    @ExceptionHandler(PlayerNotFoundException.class)
+    public ResponseEntity<Object> handlePlayerNotFound(PlayerNotFoundException ex) {
+        return new ResponseEntity<Object>(ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
     @PostMapping(path = "/webapi/admin/players", produces = MediaType.APPLICATION_JSON_VALUE)

@@ -16,11 +16,15 @@ import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.PlayerScore;
 import com.shiyuan.dao.entity.db.Tee;
 import com.shiyuan.dao.repository.CourseRepository;
+import com.shiyuan.dao.repository.EventPhotoRepository;
+import com.shiyuan.dao.repository.EventPlayerRepository;
 import com.shiyuan.dao.repository.EventRepository;
 import com.shiyuan.dao.repository.PlayerScoreRepository;
+import com.shiyuan.dao.repository.RewardRepository;
 import com.shiyuan.dao.repository.SeasonRepository;
 import com.shiyuan.dao.repository.TeamRepository;
 import com.shiyuan.dao.repository.TeeRepository;
+import com.shiyuan.service.EventNotFoundException;
 import com.shiyuan.service.EventService;
 
 @Service
@@ -43,6 +47,15 @@ public class EventServiceImpl implements EventService {
 
     @Autowired
     PlayerScoreRepository playerScoreRepository;
+
+    @Autowired
+    EventPlayerRepository eventPlayerRepository;
+
+    @Autowired
+    RewardRepository rewardRepository;
+
+    @Autowired
+    EventPhotoRepository eventPhotoRepository;
 
     @Override
     public void createEvent(EventGroup eventGroup) {
@@ -73,9 +86,22 @@ public class EventServiceImpl implements EventService {
         eventRepository.save(event);
     }
 
+    /**
+     * Event cascades only teeList (and through it player_score). event_player, reward and
+     * event_photo each carry an FK to event but are not mapped on the entity, so MySQL
+     * rejects the parent delete with error 1451 unless they are cleared first. Doing it in
+     * one transaction keeps the event and its children consistent if any step fails.
+     */
     @Override
+    @Transactional
     public void deleteEventById(String strId) {
         Long id = Long.parseLong(strId);
+        if (!eventRepository.existsById(id)) {
+            throw new EventNotFoundException("Event " + id + " was not found.");
+        }
+        eventPlayerRepository.deleteByEventId(id);
+        rewardRepository.deleteByEventId(id);
+        eventPhotoRepository.deleteByEventId(id);
         eventRepository.deleteById(id);
     }
 

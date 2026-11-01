@@ -2,6 +2,10 @@ package com.shiyuan.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -10,13 +14,19 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.PlayerScore;
+import com.shiyuan.dao.repository.EventPhotoRepository;
+import com.shiyuan.dao.repository.EventPlayerRepository;
+import com.shiyuan.dao.repository.EventRepository;
 import com.shiyuan.dao.repository.PlayerScoreRepository;
+import com.shiyuan.dao.repository.RewardRepository;
+import com.shiyuan.service.EventNotFoundException;
 
 @ExtendWith(MockitoExtension.class)
 class EventServiceImplTest {
@@ -24,8 +34,51 @@ class EventServiceImplTest {
     @Mock
     PlayerScoreRepository playerScoreRepository;
 
+    @Mock
+    EventRepository eventRepository;
+
+    @Mock
+    EventPlayerRepository eventPlayerRepository;
+
+    @Mock
+    RewardRepository rewardRepository;
+
+    @Mock
+    EventPhotoRepository eventPhotoRepository;
+
     @InjectMocks
     EventServiceImpl eventService;
+
+    // ── deleteEventById: children that Event does not cascade ────────────────
+    //
+    // Event maps only teeList (cascade ALL + orphanRemoval), so tees and their
+    // player_score rows are handled by JPA. event_player, reward and event_photo all
+    // carry an FK to event and are unmapped — MySQL rejects the parent delete with
+    // error 1451 unless they are cleared first.
+
+    @Test
+    void deleteEventById_clearsUncascadedChildrenBeforeDeletingTheEvent() {
+        when(eventRepository.existsById(1152L)).thenReturn(true);
+
+        eventService.deleteEventById("1152");
+
+        InOrder order = inOrder(eventPlayerRepository, rewardRepository,
+                eventPhotoRepository, eventRepository);
+        order.verify(eventPlayerRepository).deleteByEventId(1152L);
+        order.verify(rewardRepository).deleteByEventId(1152L);
+        order.verify(eventPhotoRepository).deleteByEventId(1152L);
+        order.verify(eventRepository).deleteById(1152L);
+    }
+
+    @Test
+    void deleteEventById_rejectsAnEventThatDoesNotExist() {
+        when(eventRepository.existsById(99999L)).thenReturn(false);
+
+        assertThrows(EventNotFoundException.class, () -> eventService.deleteEventById("99999"));
+
+        verify(eventRepository, never()).deleteById(anyLong());
+        verify(eventPlayerRepository, never()).deleteByEventId(anyLong());
+    }
 
     private PlayerScore scoreFor(Player player) {
         PlayerScore ps = new PlayerScore();

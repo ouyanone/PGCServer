@@ -7,8 +7,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import com.shiyuan.dao.entity.PlayerGolfScore;
 import com.shiyuan.dao.entity.PlayerGolfScoreEntrys;
+import com.shiyuan.dao.entity.db.Course;
 import com.shiyuan.dao.entity.db.Event;
 import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.PlayerScore;
@@ -16,6 +19,8 @@ import com.shiyuan.dao.entity.db.Tee;
 import com.shiyuan.dao.repository.EventRepository;
 import com.shiyuan.dao.repository.PlayerRepository;
 import com.shiyuan.dao.repository.PlayerScoreRepository;
+import com.shiyuan.service.HandicapCalculator;
+import com.shiyuan.service.InvalidCourseDataException;
 import com.shiyuan.service.ScoreService;
 
 @Service
@@ -36,6 +41,7 @@ public class ScoreServiceImpl implements ScoreService {
     }
 
     @Override
+    @Transactional
     public void submitPlayerScore(List<PlayerGolfScore> scores, Long eventId) {
         // Upload scores to the caller-selected event; fall back to the current
         // INIT event only when no event id was provided (backwards compatible).
@@ -45,6 +51,10 @@ public class ScoreServiceImpl implements ScoreService {
             targetEventId = currentInitEvent != null ? currentInitEvent.getId() : null;
         }
         System.out.println("submitPlayerScore targetEventId::" + targetEventId);
+
+        // Resolve and validate the course up front so a bad setup fails before anything
+        // is written, rather than silently scoring the field against a default course.
+        Course course = requireScorableCourse(targetEventId);
 
         List<PlayerScore> psEntityList = playerScoreRepository.getPlayerScoreForEvent(targetEventId);
         int i = 0;
@@ -94,17 +104,16 @@ public class ScoreServiceImpl implements ScoreService {
                         }
 
                         if (ps.getScore() != null) {
-                            double SLOPE_RATING = 126.0;
-                            double COURSE_RATING = 73.4;
-                            double rt = 113.0 / SLOPE_RATING;
-                            System.out.println("rt :: " + rt);
-                            Double currentRoundHandicap = (Double.valueOf(ps.getScore()) - COURSE_RATING) * rt;
-                            System.out.println("currentRoundhandicap :: " + currentRoundHandicap);
-                            psEntity.setCurrentRoundHandicap(currentRoundHandicap);
-                            if (psEntity.getEntryPGCHandicap() != null)
-                                psEntity.setNetScore(psEntity.getScore() - psEntity.getEntryPGCHandicap());
-                            psEntity.getPlayer().setPgcHandicap(
-                                    (currentRoundHandicap + psEntity.getEntryPGCHandicap()) / 2);
+                            psEntity.setCurrentRoundHandicap(HandicapCalculator.scoreDifferential(
+                                    psEntity.getScore(), course.getRating(), course.getSlop()));
+
+                            // player.pgc_handicap is deliberately NOT touched here: it is a
+                            // rolling mean of recent rounds, recalculated by HandicapService
+                            // when the event reaches FINISHED (STEP43).
+                            Double entryHandicap = psEntity.getEntryPGCHandicap();
+                            if (entryHandicap != null) {
+                                psEntity.setNetScore(psEntity.getScore() - entryHandicap);
+                            }
                         }
 
                         System.out.println("save score for :: " + name);
@@ -168,6 +177,34 @@ public class ScoreServiceImpl implements ScoreService {
                 // continue silently as in original
             }
         }
+    }
+
+    /**
+     * Returns the course the event is played on, or throws with an actionable message.
+     * A round handicap is meaningless without the rating and slope actually played, so
+     * an incomplete setup is refused rather than defaulted.
+     */
+    private Course requireScorableCourse(Long eventId) {
+        if (eventId == null) {
+            throw new InvalidCourseDataException(
+                    "No event was selected for this score upload. Choose a started event and try again.");
+        }
+        Event event = eventRepository.findById(eventId.longValue());
+        if (event == null) {
+            throw new InvalidCourseDataException("Event " + eventId + " was not found.");
+        }
+        Course course = event.getCourse();
+        if (course == null) {
+            throw new InvalidCourseDataException("Event '" + event.getEventName()
+                    + "' has no course assigned. Set the course in Game Management before uploading scores.");
+        }
+        if (course.getRating() == null || course.getRating() <= 0
+                || course.getSlop() == null || course.getSlop() <= 0) {
+            throw new InvalidCourseDataException("Course '" + course.getClubName() + " — "
+                    + course.getCourseName() + "' is missing a valid rating or slope."
+                    + " Update it under Plan a Game → Manage Courses.");
+        }
+        return course;
     }
 
     private Integer getHoleScore(String offSet) {

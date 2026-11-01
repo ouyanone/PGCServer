@@ -43,6 +43,10 @@ public class SecurityConfiguration {
 			.csrf(AbstractHttpConfigurer::disable)
 			.authorizeHttpRequests(authz -> authz
 				.requestMatchers("/webapi/admin/**").authenticated()
+				// Submitting scores writes player_score rows and updates every player's
+				// running PGC handicap, so it requires a signed-in user. Reading scores
+				// (GET /webapi/event/score) stays public.
+				.requestMatchers(HttpMethod.POST, "/webapi/event/scores").authenticated()
 				.anyRequest().permitAll())
 			.exceptionHandling(ex -> ex
 				.defaultAuthenticationEntryPointFor(

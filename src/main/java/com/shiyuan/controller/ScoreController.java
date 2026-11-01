@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,6 +19,7 @@ import com.shiyuan.dao.entity.PlayerGolfScore;
 import com.shiyuan.dao.entity.PlayerGolfScoreEntrys;
 import com.shiyuan.dao.entity.db.PlayerScore;
 import com.shiyuan.dao.entity.db.ScoreStatistic;
+import com.shiyuan.service.InvalidCourseDataException;
 import com.shiyuan.service.ScoreService;
 
 import io.micrometer.common.util.StringUtils;
@@ -50,6 +52,15 @@ public class ScoreController extends BaseController {
                                                    @AuthenticationPrincipal OidcUser principal) throws Exception {
         scoreService.submitPlayerScore(scores, eventId);
         return new ResponseEntity<Object>("successful", HttpStatus.OK);
+    }
+
+    /**
+     * The event's course is missing or unusable. Report it as a 400 carrying the message,
+     * so the Upload Score page can show the admin exactly what to fix.
+     */
+    @ExceptionHandler(InvalidCourseDataException.class)
+    public ResponseEntity<Object> handleInvalidCourseData(InvalidCourseDataException ex) {
+        return new ResponseEntity<Object>(ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
     @PostMapping(path = "/webapi/event/create/playerscores", produces = MediaType.APPLICATION_JSON_VALUE)
