@@ -1494,3 +1494,72 @@ fragment for the one `server` block in `nginx.conf`, not a drop-in file.
 
 **Still open:** the Cognito gate (§7); the GitHub remote for `PGCSpringMCP`, which is the owner's to
 create; and the deploy itself.
+
+#### STEP49b — the review, and what it caught (2026-11-01)
+
+A fresh reviewer read the whole branch with no memory of building it. Verdict: **ready to merge
+with fixes** — 1 Critical, 5 Important, 8 Minor. It found no path by which an unauthenticated or
+wrong-audience caller reaches a tool, none by which `phone`/`email` reaches a tool result, and no
+secret in git, a log or a committed doc. All 61 tests green after the fix pass.
+
+**The blocker was embarrassing and important.** Every one of the four places that documents how to
+run the client said:
+
+```
+java -cp target/pgc-spring-mcp.jar club.pgcgolf.springmcp.client.PgcHttpMcpClient ...
+```
+
+That cannot work. `spring-boot-maven-plugin` repackages application classes under
+`BOOT-INF/classes/` and dependencies under `BOOT-INF/lib/`, so a plain `-cp` finds neither:
+`ClassNotFoundException`, on the owner's first attempt, at the project's headline deliverable. The
+reason it survived is worth remembering — the one real end-to-end run was driven with `curl`, so
+the documented path was never the path exercised. It now reads:
+
+```
+java -Dloader.main=club.pgcgolf.springmcp.client.PgcHttpMcpClient \
+     -cp target/pgc-spring-mcp.jar \
+     org.springframework.boot.loader.launch.PropertiesLauncher ...
+```
+
+And this time it was actually run — which paid for itself immediately by capturing, against a
+**live** Cognito pool, the one hop the unit tests can only stub: `/.well-known/oauth-authorization-server`
+answers **400**, then `/.well-known/openid-configuration` answers **200** with the real authorize,
+token and JWKS endpoints. RFC 8414 is the specification for exactly that lookup and Cognito does
+not implement it; a client that stopped there would never find a token endpoint. That is now
+`docs/oauth-wire-log.md` §2b, and flow step 3 moved from PENDING to real.
+
+**Two tests were passing against broken code.** `ApplicationContextTest` asserted the `/mcp`
+response was "not 404" — which stopped distinguishing anything the moment the security filter chain
+arrived, because the filter answers 401 before the dispatcher decides whether a handler exists. The
+honesty check done when that test was written was genuine *then*, and silently expired two tasks
+later. Worse, nothing in the suite exercised the `SecurityContext` on the thread Spring AI actually
+invokes a tool from: had an upgrade moved tool execution off the request thread, every call would
+have returned *"no validated access token"* with all tests still green — failing closed, but
+silently. A new `AuthenticatedToolCallTest` does a real JSON-RPC `tools/call` with a valid token
+against a stubbed club API; both fixes were verified by planting the defect and watching it fail.
+
+**Four real defects, each re-graded upward by what it costs a person:**
+
+- **`PgcApi` treated a 3xx as success**, deserialising an empty body into an empty list — an error
+  arriving as an empty result, the one thing this project says it never does, and the thing a model
+  reports as "there are no courses". A redirect is now a failure, and the client no longer follows
+  one, so the read-only choke point cannot be escaped through a `Location` header.
+- **`get_player_profile` forwarded every upstream field** minus `phone`/`email`. It now allowlists
+  like its two siblings, so a field the club API gains next year does not reach a model by default.
+- **`OAuthFlow` accepted a redirect with no `state`** — authorization-code injection, the exact
+  attack `state` exists to prevent. Required now on the listener path.
+- **`ToolAccessGuard` caught `Exception` but not `StackOverflowError`.** Accidental recursion is the
+  likeliest shape of a bug in a hand-written policy, and it was the one policy bug the guard built
+  to contain policy bugs did not contain.
+
+Plus `docs/cognito-setup.md` §7 had exported the issuer but **not** the JWKS URI — which would have
+rejected every token at precisely the moment the owner was confirming the gate passed, with a 401
+and an apparently-correct issuer. That was the cost the Task-5 decision had itself named, and then
+the doc incurred it.
+
+**Five minors deliberately left**, for the owner to call: the `/admin/` guard is case-sensitive
+while its comment implies otherwise (unreachable today — all three tools build paths from constants
+plus a `long`); one test is misnamed `aDenyBecomesIsErrorTextInTheToolResult` when a deny is text,
+not `isError`; §6.4 puts the client secret in `curl`'s argv, visible in `ps`; `location /mcp` is a
+prefix so `/mcpanything` also proxies (and gets 401); and a body-parse failure is reported as
+"could not reach".
