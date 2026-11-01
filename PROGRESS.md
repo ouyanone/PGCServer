@@ -1422,3 +1422,75 @@ wrong for a box running nginx. `certbot delete --cert-name pgcgolf.club` would r
 that deletes a certificate and is deliberately left as the owner's decision.
 
 A pre-change backup of the whole nginx config is at `/root/nginx-backup-20261101-032513`.
+
+---
+
+### STEP49 — PGCSpringMCP: three tools over HTTP behind a validated access token ✅ (2026-11-01)
+
+Phase 2 of the MCP work, in a **new sibling repo** `PGCSpringMCP` on branch `feature-phase2-oauth`.
+Nine commits, 55 tests. `PGCMcp`, `PGCServer` and `PGCUI` source are untouched — verified, all
+three clean.
+
+**What it is.** Spring Boot 4.1.2 + Spring AI 2.0.2 (`spring-ai-starter-mcp-server-webmvc`) + MCP
+Java SDK 2.1.0 + Spring Security 7.1.2, on Java 21. Three read-only tools (`list_courses`,
+`find_player`, `get_player_profile` — chosen to cover a no-argument, a string and a numeric schema)
+served over **stateless** Streamable HTTP at `/mcp`, bound `127.0.0.1:8900`, behind an access token
+validated on signature, `iss`, `aud` and `token_use`. Plus a client that performs the whole
+discovery chain and the code exchange and prints every message.
+
+**The design rests on one empirical fact, and it is the owner's to confirm.** A Cognito access
+token carries **no `aud` claim by default** — it appears only when the authorization request
+carried RFC 8707's `resource` parameter. So `docs/cognito-setup.md` is a gate, not a runbook: §1–§6
+are the console steps, §7 is where the decoded token goes. **Still PENDING** — it needs the AWS
+console and a browser sign-in. The server is written to **fail closed** either way, and that is
+what is proved: a token with no `aud` is rejected, and there is no code path that substitutes
+`client_id`.
+
+**Verified live**, by driving the packaged jar against the real club API with a locally-signed
+token (transcript in `PGCSpringMCP/docs/oauth-wire-log.md`):
+
+- `POST /mcp` with no token → `401` with
+  `WWW-Authenticate: Bearer resource_metadata="https://pgcgolf.club/.well-known/oauth-protected-resource/mcp"`.
+- Four distinct rejections, each still carrying the challenge: wrong `aud`, absent `aud`, malformed
+  token, non-Bearer scheme.
+- `initialize` negotiating down from the requested `2026-07-28` to `2025-11-25`.
+- `tools/list` with all three schemas generated from the method signatures.
+- `list_courses` → 9 real rows, and a search of the whole result for `phone` or `email` finds
+  nothing — which matters, because **every** course row carries a `phone` upstream.
+- `get_player_profile 999999` → a sentence, not a crash. The club API answers an unknown player id
+  with **HTTP 500**, not 404.
+
+**Three things the plan had wrong, found by checking rather than assuming:**
+
+1. **The callback URL.** AWS rejects `http://127.0.0.1` callbacks — its documentation exempts only
+   `http://localhost` from the HTTPS requirement. Changed everywhere; the client still *listens* on
+   `127.0.0.1`, which is where the name resolves.
+2. **The nginx location.** `location /mcp/` does not match `POST /mcp`, which is the exact endpoint.
+   Every real request would have fallen through to `location /` and hit Tomcat — a 404 that looks
+   exactly like the MCP server being down. It is `location /mcp` with no trailing slash on
+   `proxy_pass`, so the path is passed through rather than stripped.
+3. **The course field names.** Upstream they are `parNumber`, `rating` and `slop`, not `par`,
+   `courseRating` and `slope`. The plan flagged one of the three.
+
+**And one defect in my own code, found only by running it.** The published RFC 9728 document said
+`"bearer_methods_supported": ["header", "header"]`. Spring Security's builder already defaults that
+list, and the explicit call appended a second entry. No test covered it; `DiscoveryTest` now has one
+that RED'd on `[header, header]` before the fix. Two of Spring Security's own defaults were also
+wrong here and are now set explicitly: `resource` would have been derived from the request
+(`http://127.0.0.1:8900/mcp`), and `tls_client_certificate_bound_access_tokens` defaults to **true**
+while this server does no mTLS binding at all.
+
+**Where the owner's authorization logic goes:** `policy/AccessPolicy.java`. Declare one `@Component`
+implementing it and the allow-all default is replaced. The token is already proven valid when
+`decide` is called, so it decides about the *person*. A policy that throws or returns `null`
+**denies**, and the caller is told the policy failed rather than shown its stack trace — a bug in
+authorization code must not become a way around it.
+
+**Not deployed.** `docs/deploy.md` is the runbook, with the nginx step last, `nginx -t` before every
+reload, and a rollback ordered the way you would want it under pressure. Deploying is an
+outward-facing change that waits on the owner and on the `aud` gate. Port 8900 is free, `/usr/bin/java`
+is Corretto 21.0.4, and `/etc/nginx/conf.d/` is empty — so the location blocks are a paste-in
+fragment for the one `server` block in `nginx.conf`, not a drop-in file.
+
+**Still open:** the Cognito gate (§7); the GitHub remote for `PGCSpringMCP`, which is the owner's to
+create; and the deploy itself.
