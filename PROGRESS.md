@@ -1276,3 +1276,43 @@ space the minifier keeps (`@media (min-width: 900px){`). The CSS was present all
 remembering when grepping minified CSS.
 
 Committed and pushed: PGCUI `f9453884`.
+
+### STEP46 — PGCMcp phase 1b: an MCP client, to read the protocol from the other side ✅ (2026-10-31)
+
+Context: PGCMcp V1 (the read-only MCP server, 11 tools over the public pgcgolf.club API) was
+built and merged in its own repo, `github.com/ouyanone/PGCJavaMcp`, and is tracked there plus in
+the superpowers ledger rather than here. This entry starts recording that project in PROGRESS.md.
+
+Reported: the MCP server works in Claude Desktop, but the traffic could not be seen. Claude
+Desktop's logs now record only `id=1 result` summaries instead of full JSON bodies, so the
+message bodies were genuinely not there to read — not a configuration mistake.
+
+**Why a client and not more logging:** a server only ever answers. Protocol version negotiation,
+tool discovery, and server-initiated requests all happen from the client's side, so no amount of
+server code or log tailing exposes them.
+
+**Change (PGCMcp only; PGCServer and PGCUI untouched):** a client in
+`club.pgcgolf.mcp.client` — `PgcMcpClient` (runs one whole session), `ClientOptions`,
+`WireLogTransport` + `WireLog`, `SessionReport`, `ToolArguments`, `SamplingResponder`.
+
+- The traffic is made visible by a **transport decorator**, not by changing the SDK or the
+  server. Outbound logs on `sendMessage`; inbound wraps the handler the client hands the
+  transport and taps the stream, since the transport calls the client rather than the reverse.
+- The client answers `sampling/createMessage` — the one request that runs server-to-client. PGC's
+  tools never ask for a completion, so the test suite stands up a stub server whose single tool
+  does. The resulting transcript shows a `tools/call` still open while a sampling request is
+  answered in the other direction, which is the point.
+- `PgcMcpServer.main` was split so `serve(json, tools, about)` can host any tool set over the same
+  stdio lifecycle; that is what lets the tests launch the stub server.
+
+**Verification:** 188 tests pass (105 pre-existing + 83 new), `mvn package` exit 0. Round-trip
+tests launch the real server as a child process pointed at `http://127.0.0.1:1`, so nothing
+touches the network. Also run by hand against production: handshake negotiated protocol
+`2025-11-25`, server reported `pgc-golf 1.0.0` with capabilities `logging, tools`, all 11 tools
+discovered, `find_player name=Ou` returned 1133 chars. Two tests were proved honest by planting
+the defect they claim to catch (a transport that logs but swallows a message; a plural "1 tools").
+
+Note for later: request ids on the wire are strings (`15b90052-0`), not integers — the spec
+allows either, and code that assumes a number would break.
+
+Committed on PGCMcp branch `feature-mcp-client-1b` (`e919f1b`). Not pushed, no PR, not deployed.
