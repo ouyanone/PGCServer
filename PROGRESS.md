@@ -1316,3 +1316,85 @@ Note for later: request ids on the wire are strings (`15b90052-0`), not integers
 allows either, and code that assumes a number would break.
 
 Committed on PGCMcp branch `feature-mcp-client-1b` (`e919f1b`). Not pushed, no PR, not deployed.
+
+### STEP47 — the box now survives a reboot ✅ (2026-11-01)
+
+Reported: "can you make tomcat and nginx to start after the box is rebooted? so my website can be
+available after reboot?"
+
+**Cause:** worse than described. `nginx` was `systemctl disabled`, and Tomcat had **no systemd
+unit at all** — it was started by hand with `bin/startup.sh` as root. Only `mysqld` was enabled.
+So a reboot brought back the database and nothing else, and the site stayed down until someone
+SSH'd in.
+
+**Change (server only; no application code):**
+
+- `systemctl enable nginx`.
+- New `/etc/systemd/system/tomcat.service`: `Type=simple` running `catalina.sh run`,
+  `JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto.x86_64`,
+  `CATALINA_HOME=/myApp/apache-tomcat-10.1.30`, `TimeoutStartSec=300` for the 66 MB WAR,
+  `SuccessExitStatus=143`, `Restart=on-failure`. Runs as **root**, matching how it has always
+  run there — `webapps/ROOT`, `work/`, `temp/` and `logs/` are root-owned, so moving to the
+  existing `tomcat` user (uid 1001) is a separate, riskier change.
+- **`After=mysqld.service` / `Wants=mysqld.service`** — the app connects to
+  `jdbc:mysql://localhost:3306/pgc` at startup and Hibernate runs `hbm2ddl.auto=update`, so
+  starting before MySQL accepts connections would fail deployment. This is the ordering most
+  hand-written Tomcat units get wrong.
+- `.claude/skills/pgc-deploy-aws/SKILL.md` updated to drive Tomcat through
+  `systemctl stop|start tomcat`. The old `shutdown.sh`/`startup.sh` steps would have stopped the
+  service and then launched a Tomcat **outside** systemd, silently removing reboot survival with
+  no visible sign. Verification in that skill now targets the apex host and `journalctl`.
+
+**Verification:** switchover performed live. Old hand-started pid 764007 stopped cleanly; new pid
+1200534 matches `systemctl show -p MainPID tomcat`, so systemd owns the process. All three of
+`nginx`/`tomcat`/`mysqld` report `active` and `enabled`. Public checks: `https://pgcgolf.club/`
+200 (18.7 KB, 0.24s), `/webapi/courses` 200, `/webapi/players` 200, `http://` → `https://` 301.
+Downtime was one Tomcat restart. A scripted fallback to `startup.sh` was armed and never fired.
+
+**Not verified:** the reboot itself. The units are enabled and the ordering is declared, but only
+a real reboot proves the boot path. Use **reboot**, not stop/start — stop/start releases the
+public IP unless an Elastic IP is attached. After it comes back:
+`systemctl is-active nginx tomcat mysqld` and `curl -o /dev/null -w '%{http_code}' https://pgcgolf.club/`.
+
+**Decision (owner, 2026-11-01):** the TLS certificate covers only `pgcgolf.club`, not
+`www.pgcgolf.club`, and that is intentional — the site is for member players and nobody is
+directed to the `www` host. Browsers hide the mismatch via cert-name-mismatch fallback; strict
+clients (curl, scripts, Anthropic's cloud) fail on it. Not a fault to chase.
+
+### OPEN RISK — the TLS certificate has no renewal mechanism (found 2026-11-01)
+
+Not fixed, not scheduled. Recorded here so it is not lost.
+
+`nginx` serves `/etc/letsencrypt/live/pgcgolf.club-0001/fullchain.pem`, which expires
+**2027-01-16**. Nothing on the box renews it: `crond` is **inactive**, `/etc/cron.d` and
+`/etc/cron.daily` are empty, `crontab` is not installed, none of the 7 systemd timers reference
+certbot, and nothing under `/etc/cron*` or the unit directories does either. certbot itself is a
+venv install at `/opt/certbot/bin/certbot` (3.0.0) and is **not on `PATH`**.
+
+When it lapses, `pgcgolf.club` fails for every visitor. No browser fallback helps — an expired
+certificate is not a name mismatch Chrome can route around.
+
+`certbot renew --dry-run` findings: `pgcgolf.club-0001` and `www.pgcgolf.club` both renew fine
+via the nginx authenticator. `pgcgolf.club.conf` uses the **standalone** authenticator and fails
+every time — *"Could not bind TCP port 80"* — because nginx holds port 80. That config is unused
+by nginx and is the one that already lists both names; the names were right once, the
+authenticator was wrong for a box running nginx. `certbot delete --cert-name pgcgolf.club` would
+clear it, but that deletes a certificate and should be a deliberate choice.
+
+The fix is two unit files (a systemd timer, since `crond` is not running):
+
+```
+/etc/systemd/system/certbot-renew.service
+  [Service] Type=oneshot
+  ExecStart=/opt/certbot/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"
+
+/etc/systemd/system/certbot-renew.timer
+  [Timer] OnCalendar=*-*-* 03,15:00:00   RandomizedDelaySec=3600   Persistent=true
+  [Install] WantedBy=timers.target
+
+sudo systemctl daemon-reload && sudo systemctl enable --now certbot-renew.timer
+```
+
+Claude could not apply this: the sandbox denies certificate changes
+(`[DNS / Domain / Cert Changes]`). A pre-change backup of the whole nginx config is at
+`/root/nginx-backup-20261101-032513`.
