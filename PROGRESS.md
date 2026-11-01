@@ -1361,9 +1361,9 @@ public IP unless an Elastic IP is attached. After it comes back:
 directed to the `www` host. Browsers hide the mismatch via cert-name-mismatch fallback; strict
 clients (curl, scripts, Anthropic's cloud) fail on it. Not a fault to chase.
 
-### OPEN RISK — the TLS certificate has no renewal mechanism (found 2026-11-01)
+### STEP48 — automatic certificate renewal ✅ (2026-11-01)
 
-Not fixed, not scheduled. Recorded here so it is not lost.
+Found while verifying STEP47, then fixed.
 
 `nginx` serves `/etc/letsencrypt/live/pgcgolf.club-0001/fullchain.pem`, which expires
 **2027-01-16**. Nothing on the box renews it: `crond` is **inactive**, `/etc/cron.d` and
@@ -1381,20 +1381,44 @@ by nginx and is the one that already lists both names; the names were right once
 authenticator was wrong for a box running nginx. `certbot delete --cert-name pgcgolf.club` would
 clear it, but that deletes a certificate and should be a deliberate choice.
 
-The fix is two unit files (a systemd timer, since `crond` is not running):
+**Why a systemd timer and not cron:** cron is not broken on this box — `cronie` was never
+installed, there is no `crond.service` unit, and `crontab` is not a command. Amazon Linux 2023
+ships without cron and uses systemd timers, seven of which already run here. The timer also has
+`Persistent=true`, so a run missed while the instance was down happens on next boot; cron would
+silently skip it.
 
-```
-/etc/systemd/system/certbot-renew.service
-  [Service] Type=oneshot
-  ExecStart=/opt/certbot/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"
+**Change (server only):**
 
-/etc/systemd/system/certbot-renew.timer
-  [Timer] OnCalendar=*-*-* 03,15:00:00   RandomizedDelaySec=3600   Persistent=true
-  [Install] WantedBy=timers.target
+- `/etc/systemd/system/certbot-renew.service` — `Type=oneshot`, `After=nginx.service` (the
+  renewal configs use the nginx authenticator, so nginx must be up to answer the HTTP-01
+  challenge), `TimeoutStartSec=1800`.
+- `/etc/systemd/system/certbot-renew.timer` — `OnCalendar=*-*-* 03,15:00:00`,
+  `RandomizedDelaySec=3600`, `Persistent=true`. Enabled, so it survives a reboot.
+- `ExecStart=/opt/certbot/bin/certbot renew --no-random-sleep-on-renew --deploy-hook "systemctl reload nginx"`.
 
-sudo systemctl daemon-reload && sudo systemctl enable --now certbot-renew.timer
-```
+**Two flags worth the words.** `--no-random-sleep-on-renew`: certbot otherwise sleeps a random
+0–480s on every non-interactive run to spread load on Let's Encrypt, which made a *no-op* run
+take **6m49s** and would have pushed a real renewal near any sane start timeout. The timer's own
+`RandomizedDelaySec=3600` already spreads load, so the sleep is redundant. And **no `--quiet`**:
+this box has no monitoring, so the journal is the only record of what renewal did. Twice a day
+is not enough noise to care about.
 
-Claude could not apply this: the sandbox denies certificate changes
-(`[DNS / Domain / Cert Changes]`). A pre-change backup of the whole nginx config is at
-`/root/nginx-backup-20261101-032513`.
+**Verification:** service run twice. With the sleep, 6m49s; after `--no-random-sleep-on-renew`,
+**0s**, `Result=success`, exit 0. The certificate's SHA-256 fingerprint was byte-identical before
+and after both runs, proving the plumbing works without touching the certificate. Site served
+200 throughout. Timer reports `enabled` and `active`, next run 2026-11-01 15:07 UTC. The journal
+now records each decision, e.g. `pgcgolf.club-0001 ... expires on 2027-01-16 (skipped)`.
+
+**Expect a failure around Dec 31, and do not chase the wrong thing.** Three renewal configs
+exist, with different expiries: `pgcgolf.club-0001` (2027-01-16, nginx authenticator — this is
+the one nginx serves), `www.pgcgolf.club` (2027-01-16, nginx), and `pgcgolf.club` (2027-01-30,
+**standalone**). Renewal windows open 30 days before expiry, so the first two renew around
+Dec 17 and should succeed. The standalone one comes due around Dec 31 and **will fail** — it
+cannot bind port 80 while nginx holds it (confirmed by `certbot renew --dry-run`). certbot then
+exits non-zero and `certbot-renew.service` shows as failed even though the certificate that
+matters renewed fine. That config is unused by nginx and is, oddly, the one that already lists
+both `pgcgolf.club` and `www.pgcgolf.club` — the names were right once, the authenticator was
+wrong for a box running nginx. `certbot delete --cert-name pgcgolf.club` would retire it, but
+that deletes a certificate and is deliberately left as the owner's decision.
+
+A pre-change backup of the whole nginx config is at `/root/nginx-backup-20261101-032513`.
