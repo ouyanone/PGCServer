@@ -1618,3 +1618,40 @@ owner's to run); Tomcat's `localhost_access_log.*` still accumulate forever and 
 `maxDays` on the `AccessLogValve`; `www.pgcgolf.club` still fails TLS because the served
 certificate omits that name, which is the `www` certificate the owner declined and is unrelated to
 this deploy.
+
+#### STEP50b — a third-party MCP client, over OAuth, end to end (2026-11-06)
+
+Claude Desktop connected to `https://pgcgolf.club/mcp` as a custom connector and ran tools. This is
+the first time the server was driven by a client this project did not write.
+
+Getting there took two Cognito edits. Claude Code needed none beyond the client id: it accepts a
+pre-registered `--client-id`, a `--client-secret` and a `--callback-port`, and its redirect URI is
+`http://localhost:${port}/callback`, which was already registered. **That answers the question the
+missing `registration_endpoint` raised** — Cognito advertises no RFC 7591 dynamic client
+registration, and a client that cannot be told a static client id simply cannot talk to a
+Cognito-protected MCP server. Claude Code can be told. Claude Desktop needed a `claude.ai` callback
+URL added to the app client.
+
+**The server's own log is the evidence, and it carries two findings worth more than the success:**
+
+```
+Info: Implementation[name=Anthropic/Toolbox,  version=1.0.0]
+Info: Implementation[name=Anthropic/ClaudeAI, version=1.0.0]
+```
+
+1. **The traffic originates from Anthropic's infrastructure, not the laptop** — `160.79.106.x`,
+   user-agent `Claude-User`. A hosted custom connector runs both the OAuth flow and the MCP calls
+   server-side, which is why its redirect URI is a `claude.ai` URL and why nothing appeared in the
+   desktop app's local logs. The access token therefore lives at Anthropic rather than on the
+   user's machine. A local client such as Claude Code keeps it on the machine. Same protocol,
+   materially different data path — the distinction that decides whether this pattern is acceptable
+   behind a corporate IdP.
+2. **Consecutive calls in one session arrived from different source IPs** (`.17`, `.23`, `.188`,
+   then `.140`). The stateless choice — `spring.ai.mcp.server.protocol=STATELESS`, "any request may
+   land anywhere" — is what makes that work. A session-affinity server would have failed there
+   intermittently, with a cause nearly undiagnosable from the server side.
+
+Every request returned 200 or 202; no 401s, so the claude.ai client sent the RFC 8707 `resource`
+parameter and the token's `aud` matched `pgc.mcp.resource-id`. Phase 2's goal — an OAuth access
+token reaching an MCP server and being validated there — is met with a real client against real
+infrastructure.
