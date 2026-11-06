@@ -1563,3 +1563,58 @@ plus a `long`); one test is misnamed `aDenyBecomesIsErrorTextInTheToolResult` wh
 not `isError`; §6.4 puts the client secret in `curl`'s argv, visible in `ps`; `location /mcp` is a
 prefix so `/mcpanything` also proxies (and gets 401); and a body-parse failure is reported as
 "could not reach".
+
+---
+
+### STEP50 — the Cognito gate settled, and PGCSpringMCP deployed ✅ (2026-11-05/06)
+
+Phase 2 had one assumption no test could prove: that Cognito would mint an access token whose
+`aud` is the resource identifier `https://pgcgolf.club/mcp`. The server was written to **fail
+closed** — a token with no `aud`, or an `aud` naming anything else, gets a 401 — so if Cognito
+would not honour the RFC 8707 `resource` parameter, the design was wrong rather than the code.
+
+**It honours it.** Pool `us-east-1_kfC3n4qy7` returned `aud: "https://pgcgolf.club/mcp"`,
+`token_use: "access"`, `scope: "https://pgcgolf.club/mcp/tools.read"`. Claims are recorded in
+`PGCSpringMCP/docs/cognito-setup.md` §7, which is now VERIFIED rather than PENDING; no token was
+written to any tracked file.
+
+**Three console findings, each of which cost real time and none of which is in the AWS walkthroughs:**
+
+- A prefix domain is lowercase; a pool id is case-sensitive. `us-east-1kfc3n4qy7` does not tell you
+  the pool id, which is `us-east-1_kfC3n4qy7`. Deriving it gives a 404 on discovery and then a
+  blanket 401 with nothing in the log naming the cause. Found by enumerating case variants against
+  the discovery endpoint.
+- **Creating a resource server grants its scopes to no client.** Each app client must tick the
+  custom scope separately. Until it does, `/oauth2/authorize` answers `invalid_scope` — identically
+  to a scope that does not exist, so the error cannot distinguish "not created" from "not granted".
+  Proved by sending six spelling variants plus a nonsense control: all nine behaved the same.
+- `username` holds the `sub` UUID when no alias attributes are configured. `pgc.mcp.login-claim=username`
+  is correct but not human-readable, so an `AccessPolicy` keyed on names needs an alias attribute or
+  its own mapping from `sub`.
+
+**Deployed to the EC2 box** per `docs/deploy.md`: jar at `/opt/pgc-mcp`, config in
+`/etc/pgc-mcp.env` (0600, not in git), `pgc-mcp.service` active **and enabled**, JVM on
+`127.0.0.1:8900`, two `location` blocks added to the 443 server with a backup at
+`/root/nginx.conf.before-mcp-20261106-025611` and `nginx -t` gating the reload.
+
+Verified from the public internet: website 200, `POST /mcp` unauthenticated 401 with a
+`WWW-Authenticate` naming the RFC 9728 document, that document served publicly with the right
+resource and issuer, and a real Cognito token driving `initialize` (protocol 2025-11-25),
+`tools/list` and `tools/call` against live club data with `phone` and `email` absent.
+
+**The reboot claim is no longer a claim.** The box was rebooted after 31 days of uptime; the site
+answered 200 after 17 seconds and `nginx`, `tomcat`, `mysqld`, `pgc-mcp` and `certbot-renew.timer`
+all came back active with no intervention.
+
+**The deploy also found the root filesystem at 99% — 159 MB free on 8 GB**, with a 36 MB jar to
+place. Causes: the systemd journal at 780 MB, Tomcat's `catalina.out` at 261 MB with no rotation,
+a stale 200 MB `corretto.rpm`, and 75 MB of dnf cache. Reclaimed all four (84%), then deleted 626
+Tomcat log files dated 2024-09-20 to 2026-10-31, taking that directory from 49 MB to 1.0 MB.
+`deploy/logrotate-tomcat-catalina` fixes the cause with `copytruncate` — a plain rotate would leave
+the new file empty until Tomcat restarted, and restarting Tomcat takes the website down.
+
+**Left open:** installing that logrotate drop-in (the sandbox denied the remote write, so it is the
+owner's to run); Tomcat's `localhost_access_log.*` still accumulate forever and want
+`maxDays` on the `AccessLogValve`; `www.pgcgolf.club` still fails TLS because the served
+certificate omits that name, which is the `www` certificate the owner declined and is unrelated to
+this deploy.
