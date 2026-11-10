@@ -1655,3 +1655,56 @@ Every request returned 200 or 202; no 401s, so the claude.ai client sent the RFC
 parameter and the token's `aud` matched `pgc.mcp.resource-id`. Phase 2's goal — an OAuth access
 token reaching an MCP server and being validated there — is met with a real client against real
 infrastructure.
+
+### STEP51 — PGCSpringMCP: a fourth tool, `list_players` ✅ deployed (2026-11-10)
+
+**What was asked:** expose `GET /webapi/players?includeInactive=true` as an MCP tool that lists
+every player.
+
+**What was built:** `list_players` in `PgcTools` — no arguments, returns the whole roster through a
+new allowlist projection, `rosterEntry`: `playerId`, `fName`, `lName`, `nickName`, `pgcHandicap`,
+`isActive`. It reuses `playerSummary` and adds the one field that only matters once inactive
+players are in the answer.
+
+**Decisions made, and why:**
+
+- **Six fields, not twenty.** The upstream row carries 20 fields including `phone` and `email`; the
+  raw answer is 43 KB. Projected it is 12 KB for 127 players. This is the largest result the server
+  returns, so each extra field is paid for 127 times in the caller's context window. Detail stays in
+  `get_player_profile`, which was checked to answer for inactive ids too.
+- **No argument.** The query string is a constant in the code; nothing a model sends reaches the
+  URL. An `includeInactive` flag was considered and left out — every row says `isActive`, so the
+  model can filter, and one fewer argument is one fewer thing to get wrong.
+- **The description steers away from it.** It tells the model to use `find_player` for a name and
+  this tool only for whole-roster questions, because a model that calls the big tool to look up one
+  person has spent 12 KB to do what 200 bytes would.
+- **No row cap, deliberately, and written down.** Row width is fixed by the code but row count is
+  set by club membership. `docs/why-large-responses-are-a-failure.md` now says so and names the
+  remedy if the roster reaches the thousands.
+
+**Found along the way:** `find_player` reads the bare `/webapi/players`, which returns the 109
+active players only. So `list_players` is the only tool that can surface the 18 inactive ones, and
+a name search for a former member finds nothing. Not changed — it was not asked for — but recorded
+in the README.
+
+**Verification:** tests first, watched fail on the missing method, then 67/67 green (61 before).
+Six new tests: both kinds of player returned and flagged, the exact path requested, phone/email
+never present, unknown upstream fields left out, an empty roster answered in words, an upstream 500
+explained; plus one in `PgcApiTest` pinning that a query string reaches the wire unencoded, which
+the stub-based tool tests cannot see. Then the built jar was run locally against the live club API
+with a real Cognito token: `tools/list` shows four tools, `list_players` returned 127 rows
+(109 active, 18 inactive), 12,393 bytes, keys exactly the six above, no `@` anywhere in the answer.
+
+**Committed and deployed:** PGCSpringMCP `0daf9ea` on `feature-phase2-oauth` (not pushed). The box
+had 1.3 GB free (85%) beforehand. The jar went up as `.new`, its SHA-256 matched the local build,
+the running jar was copied to `/opt/pgc-mcp/pgc-spring-mcp.jar.prev`, then swap and
+`systemctl restart pgc-mcp` -- back answering 401 on loopback in 6 seconds. No nginx or Tomcat
+change; `tomcat`, `nginx` and `mysqld` stayed active throughout.
+
+Verified from outside with a real token: site 200, `/mcp` 401 without a token, `tools/list` shows
+four tools, `list_players` returned 127 rows (109 active, 18 inactive), 12,393 bytes, the six
+allowlisted keys and no `@`; `list_courses` still answers.
+
+**Rollback, if ever needed:**
+`cd /opt/pgc-mcp && cp -p pgc-spring-mcp.jar.prev pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
+The `.prev` file is 36 MB and can be deleted once the new build has been in use for a while.
