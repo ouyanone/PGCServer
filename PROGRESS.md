@@ -1708,3 +1708,78 @@ allowlisted keys and no `@`; `list_courses` still answers.
 **Rollback, if ever needed:**
 `cd /opt/pgc-mcp && cp -p pgc-spring-mcp.jar.prev pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
 The `.prev` file is 36 MB and can be deleted once the new build has been in use for a while.
+
+---
+
+### STEP52 — PGCSpringMCP publishes the authorization server's metadata itself ✅ deployed (2026-11-10)
+
+**What was asked:** MCPJam would not connect to the deployed server. It failed three times, on
+three different rules, and after the third the question was whether to make the server answer for
+Cognito. Answer: yes — "but make a backup before making any change".
+
+**What the three failures were:**
+
+| MCPJam said | Cause |
+|---|---|
+| no `registration_endpoint` | Cognito has no dynamic client registration. Settled on the client: a pre-registered client id |
+| PKCE required, `code_challenge_methods_supported` not advertised | Cognito accepts S256 and never says so; the 2025-11-25 MCP spec tells a client to refuse |
+| could not discover metadata, HTTP 400 | Cognito serves metadata only at `{issuer}/.well-known/openid-configuration`; older protocol versions look only at `/.well-known/oauth-authorization-server` |
+
+The last two cannot be fixed on the client, and no MCPJam setting gets past both. (Advice given
+mid-way to pick protocol `2025-06-18` was wrong — it traded the second failure for the third.)
+
+**What was built:** the server now serves `GET /.well-known/oauth-authorization-server/mcp` — the
+pool's own discovery document, fetched once from Cognito, with `issuer` set to
+`https://pgcgolf.club/mcp` and `code_challenge_methods_supported: ["S256"]` added. The
+protected-resource metadata names that issuer instead of Cognito's. Every endpoint in the document
+is still Cognito's; no code or token passes through this server; token validation is unchanged.
+
+**Decisions made, and why:**
+
+- **Republish, do not invent.** Nothing in the document is hard-coded except the two changed lines.
+  If Cognito's document cannot be read, names a different issuer than the one tokens are validated
+  against, or lacks an authorization or token endpoint, the answer is `502` with the reason.
+- **The issuer is the server's URL**, because RFC 8414 requires the `issuer` in a document to match
+  the URL it was found under, and clients check.
+- **Only that one path is opened.** The root form and `/.well-known/openid-configuration` stay
+  denied; `SecurityConfig` is still deny-by-default.
+- **Fetched once; a failure remembered for ten seconds.** The endpoint is open to anyone, so it must
+  not become a way to make this server call Cognito per request, or queue on timeouts in an outage.
+- **Known cost, written down:** the advertised issuer is no longer the `iss` in the token. An MCP
+  client never compares them. An OIDC client validating an ID token would. `oauth-wire-log.md` §2c.
+- **The project's own client was wrong too.** `DiscoveryChain` appended the well-known segment to
+  the issuer path instead of inserting it before; it only ever worked against root issuers and
+  Cognito's fallback. It now tries the spec's three URLs in the spec's order.
+
+**Backups, taken before anything changed and checksum-verified:**
+git tag `backup/pre-as-metadata-20261110` (at `0daf9ea`);
+`/opt/pgc-mcp/pgc-spring-mcp.jar.bak-20261110-pre-as-metadata`;
+`/etc/nginx/nginx.conf.bak-20261110-pre-as-metadata`.
+
+**Verification:** tests first. 88/88 green (67 before): 13 unit tests for the document, 6 more in
+`DiscoveryTest`, 2 in `DiscoveryChainTest`. The five `DiscoveryTest` additions were confirmed to
+fail with the security wiring removed. The packaged jar was then run locally against the live pool
+and returned the real document before anything was deployed.
+
+**Deployed:** PGCSpringMCP `445ab9e` on `feature-phase2-oauth` (not pushed). nginx first — one
+additive `location /.well-known/oauth-authorization-server` block, `nginx -t` passed, reload —
+then the jar: uploaded as `.new`, SHA-256 matched, swapped, `systemctl restart pgc-mcp`, answering
+in 6 seconds. `tomcat` and `nginx` stayed active. Disk 86%, 1.2 GB free.
+
+Verified from outside: site 200, `/webapi/courses` 200, `/mcp` 401 with the same challenge, the
+resource metadata lists `https://pgcgolf.club/mcp`, the new document answers 200 with that issuer,
+Cognito's endpoints and S256, and the project's own client resolves it on the first request.
+
+**Not verified:** a tool call with a real token against the new jar (the last token had expired and
+a new one needs a browser sign-in), MCPJam's Connect itself, and Claude Desktop.
+
+**Still needed on the Cognito side:** MCPJam's callback URLs are not on the test app client's
+allow-list (only `http://localhost:8765/callback` is), so the login will stop at
+`redirect_mismatch` until they are added.
+
+**Rollback:**
+`sudo cp /etc/nginx/nginx.conf.bak-20261110-pre-as-metadata /etc/nginx/nginx.conf && sudo nginx -t && sudo systemctl reload nginx`
+and
+`cd /opt/pgc-mcp && cp -p pgc-spring-mcp.jar.bak-20261110-pre-as-metadata pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
+Do both or neither: the old jar with the new route is harmless, the new jar without the route
+sends clients to a 404.
