@@ -1783,3 +1783,127 @@ and
 `cd /opt/pgc-mcp && cp -p pgc-spring-mcp.jar.bak-20261110-pre-as-metadata pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
 Do both or neither: the old jar with the new route is harmless, the new jar without the route
 sends clients to a 404.
+
+---
+
+### STEP53 — PGCPyMcp: the PGCSpringMCP server ported to Python ✅ built, not deployed (2026-11-10)
+
+**Asked for:** "lets create another project called PGCPyMcp and implement it with python".
+
+**What it is:** a new sibling project, `pgc-ai/PGCPyMcp`, with the same four read-only tools
+(`list_courses`, `list_players`, `find_player`, `get_player_profile`) over stateless Streamable
+HTTP behind a validated Cognito access token. Server and tests only: no client, no deployment.
+Python 3.12, MCP Python SDK 2.3 (`MCPServer`), PyJWT, httpx, uvicorn, managed with `uv`. It
+listens on `127.0.0.1:8901` so it can run beside the Java server on `8900`.
+
+**How it is built:** on the SDK's own authentication path rather than around it. The SDK takes
+the bearer token, issues the `401` challenge, serves the RFC 9728 document and enforces the
+scope; this project supplies the `TokenVerifier` (RS256 signature against the pool's key set,
+`iss`, `exp`, `token_use=access`, `aud` contains the resource id, never falling back to
+`client_id`), the RFC 8414 document republished from Cognito with the issuer rewritten and S256
+added, the `/webapi/`-only GET choke point, unconditional `phone`/`email` stripping, and the
+access-policy seam. Tool names, argument names, descriptions and answers match the Java server
+word for word.
+
+**Decisions made without asking:** `serverInfo.name` is `pgc-golf-py` so the two servers can be
+told apart; the bind address is a constant, not a setting; the project is not installed as a
+package (on this Mac the virtualenv's `.pth` file carries the hidden flag and Python 3.12 skips
+it), so commands run from the project directory.
+
+**Differences from the Java server a client could notice:** the `tools.read` scope is enforced
+(`403`), not just advertised; no clock-skew leeway on `exp`; unknown paths answer `404`, not
+`401`; the challenge carries `error="invalid_token"` even with no token; the challenge URL is
+derived from the resource id; `Host` must be a loopback name or the public host (`421`
+otherwise, checked after authentication). All listed in the project's README.
+
+**Verification:** tests first throughout. 197/197 green, no network. The security checks were
+each removed in turn to confirm a test fails: the audience check, `token_use`, the issuer, the
+key-set refetch cooldown, redirect-following, the policy deny, the `Host` allow-list, the scope
+requirement and the verifier's audience wiring all did. (Removing the up-front `alg` header
+check alone fails nothing, because the decode call pins RS256 as well.) Then run on a real
+socket against the throwaway test pool: `/mcp` without a token `401` with the challenge, both
+open documents `200` with Cognito's real endpoints and S256, a garbage token refused and logged,
+listening on loopback only.
+
+**Not verified:** a tool call with a real Cognito token; any MCP client connecting; running
+behind nginx.
+
+**State:** nothing committed (the repository has no commits yet), nothing pushed, nothing
+deployed, production untouched.
+
+### STEP54 — PGCSpringMCP: eight more tools, twelve in all ✅ deployed (2026-11-10)
+
+**Asked for:** "add more tools to the mcp spring mcp server, such as get player score history,
+get standings etc."
+
+**Built:** the Spring server now covers the same ground as the stdio PGCMcp server, plus
+`list_players`. Eight tools added, each test-first:
+
+| Tool | Reads | Class |
+|---|---|---|
+| `get_player_score_history` | `/webapi/players/{id}/score-history` | `PgcTools` |
+| `get_standings` | `/webapi/points/standings` | `ClubTools` (new) |
+| `get_club_news` | `/webapi/news` | `ClubTools` |
+| `list_events` | `/webapi/events` | `CompetitionTools` (new) |
+| `get_event_scores` | `/webapi/points/game-scores/event/{id}` | `CompetitionTools` |
+| `get_event_rewards` | the same document's `rewards` | `CompetitionTools` |
+| `list_tournaments` | `/webapi/tournaments` | `CompetitionTools` |
+| `get_tournament_totals` | `/webapi/points/game-scores/tournament/{id}` | `CompetitionTools` |
+
+`ToolSupport` (new) holds what the three tool classes share: JSON, limits, the failure
+sentences. All three are registered in `PgcSpringMcpApplication.pgcToolCallbacks`, so the access
+policy wraps the new tools without further change. Every path is still a constant or a constant
+plus a numeric id, GET only, under `/webapi/`, nothing under `/admin/`.
+
+**Decisions made without asking** (where the Spring tools differ from PGCMcp's):
+- a season is matched by part of its name (`2025` finds `PGC 2025`); an unknown one gets a
+  sentence listing the seasons that exist;
+- `get_player_score_history` returns the current season by default, says so in `scope`, and
+  keeps the whole-history figures apart under `allSeasons`;
+- upstream's `front9`/`back9`/`hole1..18` on an event score are strokes relative to par, so they
+  leave as `front9ToPar`/`back9ToPar`/`holesToPar`;
+- `get_event_rewards` reads the rewards embedded in the event-scores document, never
+  `/webapi/rewards?eventId=`, which nests each winner's whole player row;
+- `list_tournaments` takes its dates from the rounds, because the hand-typed `endDate` is wrong
+  on live data;
+- `get_tournament_totals` lists players who missed a round after those who played them all
+  (`complete:false`), omits `totalNet` where a round has no net, and flags a name that appears
+  twice in one round (`ambiguousName`) since scores carry no player id;
+- news posts with `isActive:false` are left out;
+- lists that are cut off (`get_standings` 20, `get_club_news` 5, `list_events` 10) answer with an
+  object carrying the full count and a `note`.
+
+**Verification:** 153/153 green (88 before), no network. Ten mutations each failed a test and
+were reverted: withdrawn news kept, whole standings row passed through, truncation note dropped,
+dense ranking, event 404 reported as a server fault, holes always included, nested course passed
+through, upstream `endDate` trusted, partial totals ranked on gross alone, missing net counted
+as zero. Then each new tool was called once against the live club API from a throwaway test
+(deleted afterwards): all returned the expected shape with no `phone`/`email`; default answers
+ran from 0.4 KB (`list_tournaments`) to 4.3 KB (`get_event_scores`, 26 players), and the whole
+109-row standings table is 11.6 KB.
+
+**Not verified:** the new tools through the running server with a real Cognito token; any MCP
+client (MCPJam, Claude Desktop) listing twelve tools.
+
+**Docs:** README (tool tables, counts, layout), `docs/why-large-responses-are-a-failure.md`,
+and the comments that named a tool count. `docs/oauth-wire-log.md` and `docs/cognito-setup.md`
+still say "three tools" where they record what was captured at the time; left as records.
+
+**State:** committed on `feature-phase2-oauth` as `03ccfa1`, pushed, and added to the open
+pull request (`ouyanone/PGCSpringMcp` #1, description updated to cover it); **deployed**
+2026-11-10 21:14 EST (02:14 UTC on the 11th). The first attempt was refused by the session's
+permission mode; the owner then asked for the deploy directly. Jar built from `03ccfa1` on
+Java 21 (sha256 `d5d4dc4f…c3beb9`, verified on the server before the swap). Backup taken first:
+`/opt/pgc-mcp/pgc-spring-mcp.jar.bak-20261110-pre-twelve-tools` (sha256 `ac8b8b23…2037de`, the
+four-tool jar). Only `pgc-mcp` was restarted; Tomcat and nginx were not touched.
+
+**After the deploy:** the service log says `Registered tools: 12`, started in 3.7 s;
+`pgc-mcp`, `tomcat` and `nginx` all active; `POST /mcp` without a token answers `401` with the
+challenge naming `https://pgcgolf.club/...`; the site answers `200`; both metadata documents
+answer, the second with the `/mcp` issuer and `S256`.
+
+**Rollback:** `cd /opt/pgc-mcp && cp -p pgc-spring-mcp.jar.bak-20261110-pre-twelve-tools
+pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
+
+**Still not verified:** a tool call with a real Cognito token against the deployed server; an
+MCP client listing twelve tools. PGCMcp and PGCPyMcp untouched.
