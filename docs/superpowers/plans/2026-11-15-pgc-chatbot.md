@@ -461,13 +461,23 @@ Panel behaviour (spec §5.8, owner's option C):
   backend log, check one line per question with no token, email or question text.
 - [ ] **Step 4: Refresh check.** Wait until more than 60 minutes after sign-in (past the
   access-token lifetime), ask again, and expect an answer, not `signin`. This shows the refresh
-  works and that the refreshed token still carries `aud`. If it returns `signin`, stop and
-  report: that is the spec's "refreshed token loses aud" case.
+  works and that the refreshed token still carries `aud`. If it returns `signin`, the backend
+  log line says which cause:
+  - `signin:mcp tools/call: HTTP 401` (or `tools/list`, `initialize`): the MCP server rejected
+    the refreshed token. That is the spec's "refreshed token loses aud" case, so stop and report.
+  - `signin:token refresh failed: …`: Cognito refused the refresh token.
+  - `signin:no authorized client in session`: the session lost its tokens, for example after a
+    restart with a pre-fix session. Sign in again and repeat.
 - [ ] **Step 5:** Append a `PROGRESS.md` entry. Commit: `docs: PROGRESS chatbot built and checked
   locally`.
 
 ### Task 10: Production rollout (each step needs the owner's go-ahead)
 
+- [ ] **Step 0, a hard precondition:** confirm in the console that the website app client
+  (`3j0ifum6…`) has `https://pgcgolf.club/mcp/tools.read` ticked, and that a local sign-in
+  (Task 9) succeeded with it. The WAR's login requests that scope. If the client does not allow
+  it, Cognito answers `invalid_scope` and **no member can sign in**. The rollback is the previous
+  `ROOT.war`.
 - [ ] **Step 1:** Back up the database (`pgc-backup-database` skill). Apply `ddl/chat.sql` on
   production. Add it to the memory file of pending production DB changes before applying, and
   remove it after.

@@ -1988,3 +1988,39 @@ are set up correctly.
 - One extra console step was needed: the first sign-in showed "Login pages unavailable" until a
   managed-login style was created for the `mcpjam-test` app client (Branding → Managed login).
   New app clients in this pool need one.
+
+### STEP58 — Club assistant built (plan Tasks 1–8) 🛠 (2026-11-16)
+
+**Asked for:** build the chatbot from the approved design and plan
+(`docs/superpowers/plans/2026-11-15-pgc-chatbot.md`), inline, with one fresh review at the end.
+
+**Built (PGCServer `85ba9cb..ca8ae2e`, 7 commits; PGCUI `8d3f9e96`):**
+- the website login asks for `https://pgcgolf.club/mcp/tools.read` and sends `resource=`;
+- the member's access token is taken from the session and refreshed through
+  `OAuth2AuthorizedClientManager`;
+- three tables (`ddl/chat.sql`): last 3 exchanges, daily counts, monthly spend in DECIMAL;
+- "me" is resolved by login email → exactly one Player;
+- a hand-written MCP client sends the member's bearer token on every request. The SDK needs newer
+  Reactor and Jackson than Boot 3.3; the owner declined Boot 4 because production runs
+  Tomcat 10.1.30;
+- the Claude tool loop: Anthropic Java SDK 3.2.0, `claude-sonnet-5-5`, effort low,
+  `max_tokens` 2048, at most 5 tool calls; thinking blocks are replayed unchanged;
+- `GET /webapi/chat/history` and `POST /webapi/chat` (JSON only, members only);
+- a toolbar icon and slide-in panel in Angular, with answers rendered through the sanitizer.
+
+**Tests:**
+- backend 140/140 on JDK 21. The default `mvn` uses JDK 25, where Mockito cannot mock classes;
+  `./mvnw` is broken because `.mvn/wrapper` is missing;
+- UI 19/19 targeted specs. The other 27 generated UI specs already failed before this work;
+- mutation checks on the SQL (zero floor, member scope, decimal add), the startup price check,
+  and the XSS sanitizer.
+
+**Local DB:** `chat.sql` applied to local MySQL 9.7 through JDBC; there is no `mysql` CLI.
+
+**Not done yet:**
+- Task 9: the owner ticks `tools.read` on the website app client, provides an API key, and
+  tests end to end;
+- Task 10: production rollout;
+- the final review is running.
+
+**Agreed follow-up:** learn Spring AI in PGCServer after a Boot 3.5 upgrade.
