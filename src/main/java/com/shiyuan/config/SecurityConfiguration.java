@@ -14,6 +14,7 @@ import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientProviderBuilder;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.web.HttpSessionOAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
@@ -71,6 +72,17 @@ public class SecurityConfiguration {
 	}
 	
 	
+    /**
+     * Where the signed-in member's Cognito tokens are kept: their HTTP session. Spring Boot's
+     * default is an in-memory map keyed by user name, which outlives logout and is lost on a
+     * restart while the session itself survives -- members would be asked to sign in again
+     * after every deploy. In the session, the tokens live and die with the login.
+     */
+    @Bean
+    public OAuth2AuthorizedClientRepository authorizedClientRepository() {
+        return new HttpSessionOAuth2AuthorizedClientRepository();
+    }
+
     /**
      * Hands out the signed-in member's Cognito tokens from the session, renewing an expired
      * access token with the refresh token. The club assistant forwards that access token to the

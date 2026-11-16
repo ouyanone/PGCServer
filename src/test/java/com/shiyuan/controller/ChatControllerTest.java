@@ -20,6 +20,9 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -51,6 +54,7 @@ import com.shiyuan.chat.SignInRequiredException;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
+@ExtendWith(OutputCaptureExtension.class)
 class ChatControllerTest {
 
     @Autowired MockMvc mvc;
@@ -230,5 +234,23 @@ class ChatControllerTest {
         mvc.perform(post("/webapi/chat").with(member("sub-A")).contentType(MediaType.APPLICATION_JSON).content(ask("hi")))
                 .andExpect(status().isOk());
         verify(session).close();
+    }
+
+    /** "Sign in again" has three causes; the log must say which (all messages are token-free). */
+    @Test
+    void signin_logsItsCause_noSessionClient(CapturedOutput log) throws Exception {
+        when(tokens.accessToken(any(), any(), any())).thenThrow(new SignInRequiredException("no authorized client in session"));
+        mvc.perform(post("/webapi/chat").with(member("sub-A")).contentType(MediaType.APPLICATION_JSON).content(ask("hi")))
+                .andExpect(status().isUnauthorized());
+        org.assertj.core.api.Assertions.assertThat(log.getOut()).contains("outcome=signin:no authorized client in session");
+    }
+
+    @Test
+    void signin_logsItsCause_mcpRejectedToken(CapturedOutput log) throws Exception {
+        when(assistant.answer(anyString(), any(), any(), any(), any(), any()))
+                .thenThrow(new McpUnauthorizedException("tools/call: HTTP 401"));
+        mvc.perform(post("/webapi/chat").with(member("sub-A")).contentType(MediaType.APPLICATION_JSON).content(ask("hi")))
+                .andExpect(status().isUnauthorized());
+        org.assertj.core.api.Assertions.assertThat(log.getOut()).contains("outcome=signin:mcp tools/call: HTTP 401");
     }
 }

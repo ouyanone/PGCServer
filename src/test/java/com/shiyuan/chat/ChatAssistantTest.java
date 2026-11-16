@@ -29,7 +29,7 @@ class ChatAssistantTest {
             MODEL, new ChatPricing.Price(new BigDecimal("2.00"), new BigDecimal("10.00"))));
 
     /** Replies in order; records what the assistant gave it. */
-    static final class ScriptedModel implements ModelGateway {
+    static class ScriptedModel implements ModelGateway {
         final Deque<Object> replies = new ArrayDeque<>();
         String system;
         List<McpToolDef> tools;
@@ -232,5 +232,41 @@ class ChatAssistantTest {
         ScriptedModel model = new ScriptedModel().reply(text("   ", 1, 1));
         String answer = assistant(model).answer("q", Optional.empty(), List.of(), new FakeMcp(), new ChatUsage(), TODAY);
         assertEquals(ChatAssistant.CANNOT_HELP, answer);
+    }
+
+    /**
+     * nginx gives the site 60 s. A slow-but-answering API must end as "unavailable" inside
+     * that, not leave the member on "thinking..." while the backend finishes and saves an
+     * answer they never saw.
+     */
+    @Test
+    void deadlinePassed_noFurtherSend_unavailable_costKept() {
+        java.util.concurrent.atomic.AtomicReference<java.time.Instant> now =
+                new java.util.concurrent.atomic.AtomicReference<>(java.time.Instant.parse("2026-11-15T15:00:00Z"));
+        java.time.Clock clock = new java.time.Clock() {
+            @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            @Override public java.time.Clock withZone(java.time.ZoneId z) { return this; }
+            @Override public java.time.Instant instant() { return now.get(); }
+        };
+        ScriptedModel model = new ScriptedModel() {
+            @Override
+            public Conversation start(String system, List<McpToolDef> tools, List<ChatExchangeDto> history, String question) {
+                Conversation inner = super.start(system, tools, history, question);
+                return new Conversation() {
+                    @Override public Reply send() {
+                        now.set(now.get().plusSeconds(20)); // every model call is slow
+                        return inner.send();
+                    }
+                    @Override public void addToolResults(List<ToolResult> r) { inner.addToolResults(r); }
+                };
+            }
+        }.reply(tool("get_standings", 100, 10));
+        ChatUsage usage = new ChatUsage();
+        ChatAssistant slow = new ChatAssistant(model, pricing, MODEL, 5, clock, java.time.Duration.ofSeconds(35));
+
+        assertThrows(ModelUnavailableException.class, () ->
+                slow.answer("q", Optional.empty(), List.of(), new FakeMcp(), usage, TODAY));
+        assertEquals(2, model.sends, "40 s in, no third model call is started");
+        assertEquals(200, usage.inputTokens(), "both slow calls are still paid for");
     }
 }

@@ -28,7 +28,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
  */
 public class AnthropicModelGateway implements ModelGateway {
 
-    private static final Duration TIMEOUT = Duration.ofSeconds(60);
+    /** Per call; with no retry this keeps a question inside ChatAssistant's 35 s deadline + one call. */
+    private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
     private final String apiKey;
     private final String baseUrl;
@@ -125,7 +126,7 @@ public class AnthropicModelGateway implements ModelGateway {
                     AnthropicOkHttpClient.Builder b = AnthropicOkHttpClient.builder()
                             .apiKey(apiKey)
                             .timeout(TIMEOUT)
-                            .maxRetries(1);
+                            .maxRetries(0);
                     if (baseUrl != null && !baseUrl.isBlank()) {
                         b.baseUrl(baseUrl);
                     }

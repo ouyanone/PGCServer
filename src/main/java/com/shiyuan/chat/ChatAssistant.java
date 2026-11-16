@@ -1,5 +1,8 @@
 package com.shiyuan.chat;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -8,6 +11,11 @@ import java.util.Optional;
 /**
  * Answers one member question: Claude decides which MCP tools to call, this class calls them
  * with the member's session, and the loop ends at a text answer or at five tool calls.
+ *
+ * <p>Each question also has a deadline (35 s by default). nginx gives the site 60 s; a slow but
+ * still-answering API must end as "unavailable" inside that, rather than leaving the member on
+ * "thinking..." while the backend finishes and saves an answer they never saw. The deadline is
+ * checked before every model call and every tool call; each of those is itself time-limited.
  */
 public class ChatAssistant {
 
@@ -18,12 +26,21 @@ public class ChatAssistant {
     private final ChatPricing pricing;
     private final String modelId;
     private final int maxToolCalls;
+    private final Clock clock;
+    private final Duration deadline;
 
     public ChatAssistant(ModelGateway model, ChatPricing pricing, String modelId, int maxToolCalls) {
+        this(model, pricing, modelId, maxToolCalls, Clock.systemUTC(), Duration.ofSeconds(35));
+    }
+
+    public ChatAssistant(ModelGateway model, ChatPricing pricing, String modelId, int maxToolCalls,
+                         Clock clock, Duration deadline) {
         this.model = model;
         this.pricing = pricing;
         this.modelId = modelId;
         this.maxToolCalls = maxToolCalls;
+        this.clock = clock;
+        this.deadline = deadline;
     }
 
     /**
@@ -36,8 +53,10 @@ public class ChatAssistant {
                          McpSession mcp, ChatUsage usage, LocalDate today) {
         ModelGateway.Conversation conversation =
                 model.start(ChatPrompt.system(me, today), mcp.tools(), history, question);
+        Instant giveUpAt = clock.instant().plus(deadline);
         int toolCalls = 0;
         while (true) {
+            checkDeadline(giveUpAt);
             ModelGateway.Reply reply;
             try {
                 reply = conversation.send();
@@ -64,11 +83,18 @@ public class ChatAssistant {
 
             List<ModelGateway.ToolResult> results = new ArrayList<>();
             for (ModelGateway.ToolCall call : reply.toolCalls()) {
+                checkDeadline(giveUpAt);
                 ToolOutcome out = mcp.call(call.name(), call.arguments());
                 results.add(new ModelGateway.ToolResult(call.id(), out.text(), out.isError()));
             }
             toolCalls += reply.toolCalls().size();
             conversation.addToolResults(results);
+        }
+    }
+
+    private void checkDeadline(Instant giveUpAt) {
+        if (!clock.instant().isBefore(giveUpAt)) {
+            throw new ModelUnavailableException("question deadline of " + deadline.toSeconds() + " s passed");
         }
     }
 }

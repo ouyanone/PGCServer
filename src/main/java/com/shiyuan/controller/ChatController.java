@@ -117,11 +117,15 @@ public class ChatController {
             history.save(sub, question, answer);
             outcome = "answered";
             return ResponseEntity.ok(ChatResponse.answer(answer));
-        } catch (SignInRequiredException | McpUnauthorizedException e) {
-            outcome = "signin";
-            limits.refund(sub);
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(ChatResponse.refusal("signin", "Please sign in again to use the club assistant."));
+        } catch (SignInRequiredException e) {
+            // Messages of these exceptions are token-free by construction; the cause tells a
+            // lost session ("no authorized client") from an expired refresh ("invalid_grant").
+            outcome = "signin:" + e.getMessage();
+            return signInAgain(sub);
+        } catch (McpUnauthorizedException e) {
+            // The MCP server rejected the member's token -- e.g. a refreshed token without aud.
+            outcome = "signin:mcp " + e.getMessage();
+            return signInAgain(sub);
         } catch (ModelUnavailableException | McpUnavailableException e) {
             outcome = "unavailable:" + e.getMessage();
             limits.refund(sub);
@@ -134,5 +138,11 @@ public class ChatController {
             log.info("chat sub={} outcome={} in={} out={} cost={}", sub, outcome,
                     usage.inputTokens(), usage.outputTokens(), usage.cost().toPlainString());
         }
+    }
+
+    private ResponseEntity<ChatResponse> signInAgain(String sub) {
+        limits.refund(sub);
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ChatResponse.refusal("signin", "Please sign in again to use the club assistant."));
     }
 }
