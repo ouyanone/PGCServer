@@ -1907,3 +1907,16 @@ pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
 
 **Still not verified:** a tool call with a real Cognito token against the deployed server; an
 MCP client listing twelve tools. PGCMcp and PGCPyMcp untouched.
+
+### STEP55 — A learning plan for LangChain and LangGraph 📝 (2026-11-10)
+
+**Asked for:** a plan for learning LangChain and LangGraph, using PGC Golf as the sample, saved as
+a Markdown file for future reference.
+
+**Written:** `PGCLangLab/LEARNING-PLAN.md` (new folder, nothing else in it yet). Eight stages, from
+setup through structured output, tools and `create_agent` over the PGC MCP tools, a hand-built
+LangGraph agent, memory, an event-recap workflow with human approval, evaluation, and a capstone
+passing a member's Cognito token through to `https://pgcgolf.club/mcp`. Python chosen over Java
+because LangGraph is Python-first.
+
+**State:** not a git repository, nothing committed. No code written; Stage 0 not started.
