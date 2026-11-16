@@ -2091,3 +2091,15 @@ disk.
 questions, all `outcome=answered`, for one member; 3 history rows; spend 2026-11 = $0.217832
 (87,706 input / 4,242 output tokens). That is about 2.2 ¢ a question, or roughly 450 questions a
 month for $10.
+
+### STEP61 — Committed, pushed, pull requests opened 📬 (2026-11-16)
+
+**Asked for:** "commit and push and open pr".
+
+- PGCServer: `75bf16e` (deployed `static/` bundle, STEP59–60, plan ledger). `feature-07182026` was
+  pushed and is level with origin. PR #3 into `main` covers 43 commits (STEP40–61), with the
+  chatbot as the headline.
+- PGCUI: `feature-07182026` was pushed (`b5338215..6eed4048`). PR #2 into `main` covers 16
+  commits. The two tracked `dist/` files changed by the deploy build were left uncommitted on
+  purpose, because the deploy builds `dist/` fresh.
+- Both PRs say the branch is already in production, so merging records reality.
