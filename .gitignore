@@ -4,3 +4,6 @@
 target/.DS_Store
 
 target/
+
+# superpowers scratch (brainstorm mockups, plan ledgers)
+.superpowers/

@@ -1316,3 +1316,790 @@ Note for later: request ids on the wire are strings (`15b90052-0`), not integers
 allows either, and code that assumes a number would break.
 
 Committed on PGCMcp branch `feature-mcp-client-1b` (`e919f1b`). Not pushed, no PR, not deployed.
+
+### STEP47 — the box now survives a reboot ✅ (2026-11-01)
+
+Reported: "can you make tomcat and nginx to start after the box is rebooted? so my website can be
+available after reboot?"
+
+**Cause:** worse than described. `nginx` was `systemctl disabled`, and Tomcat had **no systemd
+unit at all** — it was started by hand with `bin/startup.sh` as root. Only `mysqld` was enabled.
+So a reboot brought back the database and nothing else, and the site stayed down until someone
+SSH'd in.
+
+**Change (server only; no application code):**
+
+- `systemctl enable nginx`.
+- New `/etc/systemd/system/tomcat.service`: `Type=simple` running `catalina.sh run`,
+  `JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto.x86_64`,
+  `CATALINA_HOME=/myApp/apache-tomcat-10.1.30`, `TimeoutStartSec=300` for the 66 MB WAR,
+  `SuccessExitStatus=143`, `Restart=on-failure`. Runs as **root**, matching how it has always
+  run there — `webapps/ROOT`, `work/`, `temp/` and `logs/` are root-owned, so moving to the
+  existing `tomcat` user (uid 1001) is a separate, riskier change.
+- **`After=mysqld.service` / `Wants=mysqld.service`** — the app connects to
+  `jdbc:mysql://localhost:3306/pgc` at startup and Hibernate runs `hbm2ddl.auto=update`, so
+  starting before MySQL accepts connections would fail deployment. This is the ordering most
+  hand-written Tomcat units get wrong.
+- `.claude/skills/pgc-deploy-aws/SKILL.md` updated to drive Tomcat through
+  `systemctl stop|start tomcat`. The old `shutdown.sh`/`startup.sh` steps would have stopped the
+  service and then launched a Tomcat **outside** systemd, silently removing reboot survival with
+  no visible sign. Verification in that skill now targets the apex host and `journalctl`.
+
+**Verification:** switchover performed live. Old hand-started pid 764007 stopped cleanly; new pid
+1200534 matches `systemctl show -p MainPID tomcat`, so systemd owns the process. All three of
+`nginx`/`tomcat`/`mysqld` report `active` and `enabled`. Public checks: `https://pgcgolf.club/`
+200 (18.7 KB, 0.24s), `/webapi/courses` 200, `/webapi/players` 200, `http://` → `https://` 301.
+Downtime was one Tomcat restart. A scripted fallback to `startup.sh` was armed and never fired.
+
+**Not verified:** the reboot itself. The units are enabled and the ordering is declared, but only
+a real reboot proves the boot path. Use **reboot**, not stop/start — stop/start releases the
+public IP unless an Elastic IP is attached. After it comes back:
+`systemctl is-active nginx tomcat mysqld` and `curl -o /dev/null -w '%{http_code}' https://pgcgolf.club/`.
+
+**Decision (owner, 2026-11-01):** the TLS certificate covers only `pgcgolf.club`, not
+`www.pgcgolf.club`, and that is intentional — the site is for member players and nobody is
+directed to the `www` host. Browsers hide the mismatch via cert-name-mismatch fallback; strict
+clients (curl, scripts, Anthropic's cloud) fail on it. Not a fault to chase.
+
+### STEP48 — automatic certificate renewal ✅ (2026-11-01)
+
+Found while verifying STEP47, then fixed.
+
+`nginx` serves `/etc/letsencrypt/live/pgcgolf.club-0001/fullchain.pem`, which expires
+**2027-01-16**. Nothing on the box renews it: `crond` is **inactive**, `/etc/cron.d` and
+`/etc/cron.daily` are empty, `crontab` is not installed, none of the 7 systemd timers reference
+certbot, and nothing under `/etc/cron*` or the unit directories does either. certbot itself is a
+venv install at `/opt/certbot/bin/certbot` (3.0.0) and is **not on `PATH`**.
+
+When it lapses, `pgcgolf.club` fails for every visitor. No browser fallback helps — an expired
+certificate is not a name mismatch Chrome can route around.
+
+`certbot renew --dry-run` findings: `pgcgolf.club-0001` and `www.pgcgolf.club` both renew fine
+via the nginx authenticator. `pgcgolf.club.conf` uses the **standalone** authenticator and fails
+every time — *"Could not bind TCP port 80"* — because nginx holds port 80. That config is unused
+by nginx and is the one that already lists both names; the names were right once, the
+authenticator was wrong for a box running nginx. `certbot delete --cert-name pgcgolf.club` would
+clear it, but that deletes a certificate and should be a deliberate choice.
+
+**Why a systemd timer and not cron:** cron is not broken on this box — `cronie` was never
+installed, there is no `crond.service` unit, and `crontab` is not a command. Amazon Linux 2023
+ships without cron and uses systemd timers, seven of which already run here. The timer also has
+`Persistent=true`, so a run missed while the instance was down happens on next boot; cron would
+silently skip it.
+
+**Change (server only):**
+
+- `/etc/systemd/system/certbot-renew.service` — `Type=oneshot`, `After=nginx.service` (the
+  renewal configs use the nginx authenticator, so nginx must be up to answer the HTTP-01
+  challenge), `TimeoutStartSec=1800`.
+- `/etc/systemd/system/certbot-renew.timer` — `OnCalendar=*-*-* 03,15:00:00`,
+  `RandomizedDelaySec=3600`, `Persistent=true`. Enabled, so it survives a reboot.
+- `ExecStart=/opt/certbot/bin/certbot renew --no-random-sleep-on-renew --deploy-hook "systemctl reload nginx"`.
+
+**Two flags worth the words.** `--no-random-sleep-on-renew`: certbot otherwise sleeps a random
+0–480s on every non-interactive run to spread load on Let's Encrypt, which made a *no-op* run
+take **6m49s** and would have pushed a real renewal near any sane start timeout. The timer's own
+`RandomizedDelaySec=3600` already spreads load, so the sleep is redundant. And **no `--quiet`**:
+this box has no monitoring, so the journal is the only record of what renewal did. Twice a day
+is not enough noise to care about.
+
+**Verification:** service run twice. With the sleep, 6m49s; after `--no-random-sleep-on-renew`,
+**0s**, `Result=success`, exit 0. The certificate's SHA-256 fingerprint was byte-identical before
+and after both runs, proving the plumbing works without touching the certificate. Site served
+200 throughout. Timer reports `enabled` and `active`, next run 2026-11-01 15:07 UTC. The journal
+now records each decision, e.g. `pgcgolf.club-0001 ... expires on 2027-01-16 (skipped)`.
+
+**Expect a failure around Dec 31, and do not chase the wrong thing.** Three renewal configs
+exist, with different expiries: `pgcgolf.club-0001` (2027-01-16, nginx authenticator — this is
+the one nginx serves), `www.pgcgolf.club` (2027-01-16, nginx), and `pgcgolf.club` (2027-01-30,
+**standalone**). Renewal windows open 30 days before expiry, so the first two renew around
+Dec 17 and should succeed. The standalone one comes due around Dec 31 and **will fail** — it
+cannot bind port 80 while nginx holds it (confirmed by `certbot renew --dry-run`). certbot then
+exits non-zero and `certbot-renew.service` shows as failed even though the certificate that
+matters renewed fine. That config is unused by nginx and is, oddly, the one that already lists
+both `pgcgolf.club` and `www.pgcgolf.club` — the names were right once, the authenticator was
+wrong for a box running nginx. `certbot delete --cert-name pgcgolf.club` would retire it, but
+that deletes a certificate and is deliberately left as the owner's decision.
+
+A pre-change backup of the whole nginx config is at `/root/nginx-backup-20261101-032513`.
+
+---
+
+### STEP49 — PGCSpringMCP: three tools over HTTP behind a validated access token ✅ (2026-11-01)
+
+Phase 2 of the MCP work, in a **new sibling repo** `PGCSpringMCP` on branch `feature-phase2-oauth`.
+Nine commits, 55 tests. `PGCMcp`, `PGCServer` and `PGCUI` source are untouched — verified, all
+three clean.
+
+**What it is.** Spring Boot 4.1.2 + Spring AI 2.0.2 (`spring-ai-starter-mcp-server-webmvc`) + MCP
+Java SDK 2.1.0 + Spring Security 7.1.2, on Java 21. Three read-only tools (`list_courses`,
+`find_player`, `get_player_profile` — chosen to cover a no-argument, a string and a numeric schema)
+served over **stateless** Streamable HTTP at `/mcp`, bound `127.0.0.1:8900`, behind an access token
+validated on signature, `iss`, `aud` and `token_use`. Plus a client that performs the whole
+discovery chain and the code exchange and prints every message.
+
+**The design rests on one empirical fact, and it is the owner's to confirm.** A Cognito access
+token carries **no `aud` claim by default** — it appears only when the authorization request
+carried RFC 8707's `resource` parameter. So `docs/cognito-setup.md` is a gate, not a runbook: §1–§6
+are the console steps, §7 is where the decoded token goes. **Still PENDING** — it needs the AWS
+console and a browser sign-in. The server is written to **fail closed** either way, and that is
+what is proved: a token with no `aud` is rejected, and there is no code path that substitutes
+`client_id`.
+
+**Verified live**, by driving the packaged jar against the real club API with a locally-signed
+token (transcript in `PGCSpringMCP/docs/oauth-wire-log.md`):
+
+- `POST /mcp` with no token → `401` with
+  `WWW-Authenticate: Bearer resource_metadata="https://pgcgolf.club/.well-known/oauth-protected-resource/mcp"`.
+- Four distinct rejections, each still carrying the challenge: wrong `aud`, absent `aud`, malformed
+  token, non-Bearer scheme.
+- `initialize` negotiating down from the requested `2026-07-28` to `2025-11-25`.
+- `tools/list` with all three schemas generated from the method signatures.
+- `list_courses` → 9 real rows, and a search of the whole result for `phone` or `email` finds
+  nothing — which matters, because **every** course row carries a `phone` upstream.
+- `get_player_profile 999999` → a sentence, not a crash. The club API answers an unknown player id
+  with **HTTP 500**, not 404.
+
+**Three things the plan had wrong, found by checking rather than assuming:**
+
+1. **The callback URL.** AWS rejects `http://127.0.0.1` callbacks — its documentation exempts only
+   `http://localhost` from the HTTPS requirement. Changed everywhere; the client still *listens* on
+   `127.0.0.1`, which is where the name resolves.
+2. **The nginx location.** `location /mcp/` does not match `POST /mcp`, which is the exact endpoint.
+   Every real request would have fallen through to `location /` and hit Tomcat — a 404 that looks
+   exactly like the MCP server being down. It is `location /mcp` with no trailing slash on
+   `proxy_pass`, so the path is passed through rather than stripped.
+3. **The course field names.** Upstream they are `parNumber`, `rating` and `slop`, not `par`,
+   `courseRating` and `slope`. The plan flagged one of the three.
+
+**And one defect in my own code, found only by running it.** The published RFC 9728 document said
+`"bearer_methods_supported": ["header", "header"]`. Spring Security's builder already defaults that
+list, and the explicit call appended a second entry. No test covered it; `DiscoveryTest` now has one
+that RED'd on `[header, header]` before the fix. Two of Spring Security's own defaults were also
+wrong here and are now set explicitly: `resource` would have been derived from the request
+(`http://127.0.0.1:8900/mcp`), and `tls_client_certificate_bound_access_tokens` defaults to **true**
+while this server does no mTLS binding at all.
+
+**Where the owner's authorization logic goes:** `policy/AccessPolicy.java`. Declare one `@Component`
+implementing it and the allow-all default is replaced. The token is already proven valid when
+`decide` is called, so it decides about the *person*. A policy that throws or returns `null`
+**denies**, and the caller is told the policy failed rather than shown its stack trace — a bug in
+authorization code must not become a way around it.
+
+**Not deployed.** `docs/deploy.md` is the runbook, with the nginx step last, `nginx -t` before every
+reload, and a rollback ordered the way you would want it under pressure. Deploying is an
+outward-facing change that waits on the owner and on the `aud` gate. Port 8900 is free, `/usr/bin/java`
+is Corretto 21.0.4, and `/etc/nginx/conf.d/` is empty — so the location blocks are a paste-in
+fragment for the one `server` block in `nginx.conf`, not a drop-in file.
+
+**Still open:** the Cognito gate (§7); the GitHub remote for `PGCSpringMCP`, which is the owner's to
+create; and the deploy itself.
+
+#### STEP49b — the review, and what it caught (2026-11-01)
+
+A fresh reviewer read the whole branch with no memory of building it. Verdict: **ready to merge
+with fixes** — 1 Critical, 5 Important, 8 Minor. It found no path by which an unauthenticated or
+wrong-audience caller reaches a tool, none by which `phone`/`email` reaches a tool result, and no
+secret in git, a log or a committed doc. All 61 tests green after the fix pass.
+
+**The blocker was embarrassing and important.** Every one of the four places that documents how to
+run the client said:
+
+```
+java -cp target/pgc-spring-mcp.jar club.pgcgolf.springmcp.client.PgcHttpMcpClient ...
+```
+
+That cannot work. `spring-boot-maven-plugin` repackages application classes under
+`BOOT-INF/classes/` and dependencies under `BOOT-INF/lib/`, so a plain `-cp` finds neither:
+`ClassNotFoundException`, on the owner's first attempt, at the project's headline deliverable. The
+reason it survived is worth remembering — the one real end-to-end run was driven with `curl`, so
+the documented path was never the path exercised. It now reads:
+
+```
+java -Dloader.main=club.pgcgolf.springmcp.client.PgcHttpMcpClient \
+     -cp target/pgc-spring-mcp.jar \
+     org.springframework.boot.loader.launch.PropertiesLauncher ...
+```
+
+And this time it was actually run — which paid for itself immediately by capturing, against a
+**live** Cognito pool, the one hop the unit tests can only stub: `/.well-known/oauth-authorization-server`
+answers **400**, then `/.well-known/openid-configuration` answers **200** with the real authorize,
+token and JWKS endpoints. RFC 8414 is the specification for exactly that lookup and Cognito does
+not implement it; a client that stopped there would never find a token endpoint. That is now
+`docs/oauth-wire-log.md` §2b, and flow step 3 moved from PENDING to real.
+
+**Two tests were passing against broken code.** `ApplicationContextTest` asserted the `/mcp`
+response was "not 404" — which stopped distinguishing anything the moment the security filter chain
+arrived, because the filter answers 401 before the dispatcher decides whether a handler exists. The
+honesty check done when that test was written was genuine *then*, and silently expired two tasks
+later. Worse, nothing in the suite exercised the `SecurityContext` on the thread Spring AI actually
+invokes a tool from: had an upgrade moved tool execution off the request thread, every call would
+have returned *"no validated access token"* with all tests still green — failing closed, but
+silently. A new `AuthenticatedToolCallTest` does a real JSON-RPC `tools/call` with a valid token
+against a stubbed club API; both fixes were verified by planting the defect and watching it fail.
+
+**Four real defects, each re-graded upward by what it costs a person:**
+
+- **`PgcApi` treated a 3xx as success**, deserialising an empty body into an empty list — an error
+  arriving as an empty result, the one thing this project says it never does, and the thing a model
+  reports as "there are no courses". A redirect is now a failure, and the client no longer follows
+  one, so the read-only choke point cannot be escaped through a `Location` header.
+- **`get_player_profile` forwarded every upstream field** minus `phone`/`email`. It now allowlists
+  like its two siblings, so a field the club API gains next year does not reach a model by default.
+- **`OAuthFlow` accepted a redirect with no `state`** — authorization-code injection, the exact
+  attack `state` exists to prevent. Required now on the listener path.
+- **`ToolAccessGuard` caught `Exception` but not `StackOverflowError`.** Accidental recursion is the
+  likeliest shape of a bug in a hand-written policy, and it was the one policy bug the guard built
+  to contain policy bugs did not contain.
+
+Plus `docs/cognito-setup.md` §7 had exported the issuer but **not** the JWKS URI — which would have
+rejected every token at precisely the moment the owner was confirming the gate passed, with a 401
+and an apparently-correct issuer. That was the cost the Task-5 decision had itself named, and then
+the doc incurred it.
+
+**Five minors deliberately left**, for the owner to call: the `/admin/` guard is case-sensitive
+while its comment implies otherwise (unreachable today — all three tools build paths from constants
+plus a `long`); one test is misnamed `aDenyBecomesIsErrorTextInTheToolResult` when a deny is text,
+not `isError`; §6.4 puts the client secret in `curl`'s argv, visible in `ps`; `location /mcp` is a
+prefix so `/mcpanything` also proxies (and gets 401); and a body-parse failure is reported as
+"could not reach".
+
+---
+
+### STEP50 — the Cognito gate settled, and PGCSpringMCP deployed ✅ (2026-11-05/06)
+
+Phase 2 had one assumption no test could prove: that Cognito would mint an access token whose
+`aud` is the resource identifier `https://pgcgolf.club/mcp`. The server was written to **fail
+closed** — a token with no `aud`, or an `aud` naming anything else, gets a 401 — so if Cognito
+would not honour the RFC 8707 `resource` parameter, the design was wrong rather than the code.
+
+**It honours it.** Pool `us-east-1_kfC3n4qy7` returned `aud: "https://pgcgolf.club/mcp"`,
+`token_use: "access"`, `scope: "https://pgcgolf.club/mcp/tools.read"`. Claims are recorded in
+`PGCSpringMCP/docs/cognito-setup.md` §7, which is now VERIFIED rather than PENDING; no token was
+written to any tracked file.
+
+**Three console findings, each of which cost real time and none of which is in the AWS walkthroughs:**
+
+- A prefix domain is lowercase; a pool id is case-sensitive. `us-east-1kfc3n4qy7` does not tell you
+  the pool id, which is `us-east-1_kfC3n4qy7`. Deriving it gives a 404 on discovery and then a
+  blanket 401 with nothing in the log naming the cause. Found by enumerating case variants against
+  the discovery endpoint.
+- **Creating a resource server grants its scopes to no client.** Each app client must tick the
+  custom scope separately. Until it does, `/oauth2/authorize` answers `invalid_scope` — identically
+  to a scope that does not exist, so the error cannot distinguish "not created" from "not granted".
+  Proved by sending six spelling variants plus a nonsense control: all nine behaved the same.
+- `username` holds the `sub` UUID when no alias attributes are configured. `pgc.mcp.login-claim=username`
+  is correct but not human-readable, so an `AccessPolicy` keyed on names needs an alias attribute or
+  its own mapping from `sub`.
+
+**Deployed to the EC2 box** per `docs/deploy.md`: jar at `/opt/pgc-mcp`, config in
+`/etc/pgc-mcp.env` (0600, not in git), `pgc-mcp.service` active **and enabled**, JVM on
+`127.0.0.1:8900`, two `location` blocks added to the 443 server with a backup at
+`/root/nginx.conf.before-mcp-20261106-025611` and `nginx -t` gating the reload.
+
+Verified from the public internet: website 200, `POST /mcp` unauthenticated 401 with a
+`WWW-Authenticate` naming the RFC 9728 document, that document served publicly with the right
+resource and issuer, and a real Cognito token driving `initialize` (protocol 2025-11-25),
+`tools/list` and `tools/call` against live club data with `phone` and `email` absent.
+
+**The reboot claim is no longer a claim.** The box was rebooted after 31 days of uptime; the site
+answered 200 after 17 seconds and `nginx`, `tomcat`, `mysqld`, `pgc-mcp` and `certbot-renew.timer`
+all came back active with no intervention.
+
+**The deploy also found the root filesystem at 99% — 159 MB free on 8 GB**, with a 36 MB jar to
+place. Causes: the systemd journal at 780 MB, Tomcat's `catalina.out` at 261 MB with no rotation,
+a stale 200 MB `corretto.rpm`, and 75 MB of dnf cache. Reclaimed all four (84%), then deleted 626
+Tomcat log files dated 2024-09-20 to 2026-10-31, taking that directory from 49 MB to 1.0 MB.
+`deploy/logrotate-tomcat-catalina` fixes the cause with `copytruncate` — a plain rotate would leave
+the new file empty until Tomcat restarted, and restarting Tomcat takes the website down.
+
+**Left open:** installing that logrotate drop-in (the sandbox denied the remote write, so it is the
+owner's to run); Tomcat's `localhost_access_log.*` still accumulate forever and want
+`maxDays` on the `AccessLogValve`; `www.pgcgolf.club` still fails TLS because the served
+certificate omits that name, which is the `www` certificate the owner declined and is unrelated to
+this deploy.
+
+#### STEP50b — a third-party MCP client, over OAuth, end to end (2026-11-06)
+
+Claude Desktop connected to `https://pgcgolf.club/mcp` as a custom connector and ran tools. This is
+the first time the server was driven by a client this project did not write.
+
+Getting there took two Cognito edits. Claude Code needed none beyond the client id: it accepts a
+pre-registered `--client-id`, a `--client-secret` and a `--callback-port`, and its redirect URI is
+`http://localhost:${port}/callback`, which was already registered. **That answers the question the
+missing `registration_endpoint` raised** — Cognito advertises no RFC 7591 dynamic client
+registration, and a client that cannot be told a static client id simply cannot talk to a
+Cognito-protected MCP server. Claude Code can be told. Claude Desktop needed a `claude.ai` callback
+URL added to the app client.
+
+**The server's own log is the evidence, and it carries two findings worth more than the success:**
+
+```
+Info: Implementation[name=Anthropic/Toolbox,  version=1.0.0]
+Info: Implementation[name=Anthropic/ClaudeAI, version=1.0.0]
+```
+
+1. **The traffic originates from Anthropic's infrastructure, not the laptop** — `160.79.106.x`,
+   user-agent `Claude-User`. A hosted custom connector runs both the OAuth flow and the MCP calls
+   server-side, which is why its redirect URI is a `claude.ai` URL and why nothing appeared in the
+   desktop app's local logs. The access token therefore lives at Anthropic rather than on the
+   user's machine. A local client such as Claude Code keeps it on the machine. Same protocol,
+   materially different data path — the distinction that decides whether this pattern is acceptable
+   behind a corporate IdP.
+2. **Consecutive calls in one session arrived from different source IPs** (`.17`, `.23`, `.188`,
+   then `.140`). The stateless choice — `spring.ai.mcp.server.protocol=STATELESS`, "any request may
+   land anywhere" — is what makes that work. A session-affinity server would have failed there
+   intermittently, with a cause nearly undiagnosable from the server side.
+
+Every request returned 200 or 202; no 401s, so the claude.ai client sent the RFC 8707 `resource`
+parameter and the token's `aud` matched `pgc.mcp.resource-id`. Phase 2's goal — an OAuth access
+token reaching an MCP server and being validated there — is met with a real client against real
+infrastructure.
+
+### STEP51 — PGCSpringMCP: a fourth tool, `list_players` ✅ deployed (2026-11-10)
+
+**What was asked:** expose `GET /webapi/players?includeInactive=true` as an MCP tool that lists
+every player.
+
+**What was built:** `list_players` in `PgcTools` — no arguments, returns the whole roster through a
+new allowlist projection, `rosterEntry`: `playerId`, `fName`, `lName`, `nickName`, `pgcHandicap`,
+`isActive`. It reuses `playerSummary` and adds the one field that only matters once inactive
+players are in the answer.
+
+**Decisions made, and why:**
+
+- **Six fields, not twenty.** The upstream row carries 20 fields including `phone` and `email`; the
+  raw answer is 43 KB. Projected it is 12 KB for 127 players. This is the largest result the server
+  returns, so each extra field is paid for 127 times in the caller's context window. Detail stays in
+  `get_player_profile`, which was checked to answer for inactive ids too.
+- **No argument.** The query string is a constant in the code; nothing a model sends reaches the
+  URL. An `includeInactive` flag was considered and left out — every row says `isActive`, so the
+  model can filter, and one fewer argument is one fewer thing to get wrong.
+- **The description steers away from it.** It tells the model to use `find_player` for a name and
+  this tool only for whole-roster questions, because a model that calls the big tool to look up one
+  person has spent 12 KB to do what 200 bytes would.
+- **No row cap, deliberately, and written down.** Row width is fixed by the code but row count is
+  set by club membership. `docs/why-large-responses-are-a-failure.md` now says so and names the
+  remedy if the roster reaches the thousands.
+
+**Found along the way:** `find_player` reads the bare `/webapi/players`, which returns the 109
+active players only. So `list_players` is the only tool that can surface the 18 inactive ones, and
+a name search for a former member finds nothing. Not changed — it was not asked for — but recorded
+in the README.
+
+**Verification:** tests first, watched fail on the missing method, then 67/67 green (61 before).
+Six new tests: both kinds of player returned and flagged, the exact path requested, phone/email
+never present, unknown upstream fields left out, an empty roster answered in words, an upstream 500
+explained; plus one in `PgcApiTest` pinning that a query string reaches the wire unencoded, which
+the stub-based tool tests cannot see. Then the built jar was run locally against the live club API
+with a real Cognito token: `tools/list` shows four tools, `list_players` returned 127 rows
+(109 active, 18 inactive), 12,393 bytes, keys exactly the six above, no `@` anywhere in the answer.
+
+**Committed and deployed:** PGCSpringMCP `0daf9ea` on `feature-phase2-oauth` (not pushed). The box
+had 1.3 GB free (85%) beforehand. The jar went up as `.new`, its SHA-256 matched the local build,
+the running jar was copied to `/opt/pgc-mcp/pgc-spring-mcp.jar.prev`, then swap and
+`systemctl restart pgc-mcp` -- back answering 401 on loopback in 6 seconds. No nginx or Tomcat
+change; `tomcat`, `nginx` and `mysqld` stayed active throughout.
+
+Verified from outside with a real token: site 200, `/mcp` 401 without a token, `tools/list` shows
+four tools, `list_players` returned 127 rows (109 active, 18 inactive), 12,393 bytes, the six
+allowlisted keys and no `@`; `list_courses` still answers.
+
+**Rollback, if ever needed:**
+`cd /opt/pgc-mcp && cp -p pgc-spring-mcp.jar.prev pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
+The `.prev` file is 36 MB and can be deleted once the new build has been in use for a while.
+
+---
+
+### STEP52 — PGCSpringMCP publishes the authorization server's metadata itself ✅ deployed (2026-11-10)
+
+**What was asked:** MCPJam would not connect to the deployed server. It failed three times, on
+three different rules, and after the third the question was whether to make the server answer for
+Cognito. Answer: yes — "but make a backup before making any change".
+
+**What the three failures were:**
+
+| MCPJam said | Cause |
+|---|---|
+| no `registration_endpoint` | Cognito has no dynamic client registration. Settled on the client: a pre-registered client id |
+| PKCE required, `code_challenge_methods_supported` not advertised | Cognito accepts S256 and never says so; the 2025-11-25 MCP spec tells a client to refuse |
+| could not discover metadata, HTTP 400 | Cognito serves metadata only at `{issuer}/.well-known/openid-configuration`; older protocol versions look only at `/.well-known/oauth-authorization-server` |
+
+The last two cannot be fixed on the client, and no MCPJam setting gets past both. (Advice given
+mid-way to pick protocol `2025-06-18` was wrong — it traded the second failure for the third.)
+
+**What was built:** the server now serves `GET /.well-known/oauth-authorization-server/mcp` — the
+pool's own discovery document, fetched once from Cognito, with `issuer` set to
+`https://pgcgolf.club/mcp` and `code_challenge_methods_supported: ["S256"]` added. The
+protected-resource metadata names that issuer instead of Cognito's. Every endpoint in the document
+is still Cognito's; no code or token passes through this server; token validation is unchanged.
+
+**Decisions made, and why:**
+
+- **Republish, do not invent.** Nothing in the document is hard-coded except the two changed lines.
+  If Cognito's document cannot be read, names a different issuer than the one tokens are validated
+  against, or lacks an authorization or token endpoint, the answer is `502` with the reason.
+- **The issuer is the server's URL**, because RFC 8414 requires the `issuer` in a document to match
+  the URL it was found under, and clients check.
+- **Only that one path is opened.** The root form and `/.well-known/openid-configuration` stay
+  denied; `SecurityConfig` is still deny-by-default.
+- **Fetched once; a failure remembered for ten seconds.** The endpoint is open to anyone, so it must
+  not become a way to make this server call Cognito per request, or queue on timeouts in an outage.
+- **Known cost, written down:** the advertised issuer is no longer the `iss` in the token. An MCP
+  client never compares them. An OIDC client validating an ID token would. `oauth-wire-log.md` §2c.
+- **The project's own client was wrong too.** `DiscoveryChain` appended the well-known segment to
+  the issuer path instead of inserting it before; it only ever worked against root issuers and
+  Cognito's fallback. It now tries the spec's three URLs in the spec's order.
+
+**Backups, taken before anything changed and checksum-verified:**
+git tag `backup/pre-as-metadata-20261110` (at `0daf9ea`);
+`/opt/pgc-mcp/pgc-spring-mcp.jar.bak-20261110-pre-as-metadata`;
+`/etc/nginx/nginx.conf.bak-20261110-pre-as-metadata`.
+
+**Verification:** tests first. 88/88 green (67 before): 13 unit tests for the document, 6 more in
+`DiscoveryTest`, 2 in `DiscoveryChainTest`. The five `DiscoveryTest` additions were confirmed to
+fail with the security wiring removed. The packaged jar was then run locally against the live pool
+and returned the real document before anything was deployed.
+
+**Deployed:** PGCSpringMCP `445ab9e` on `feature-phase2-oauth` (not pushed). nginx first — one
+additive `location /.well-known/oauth-authorization-server` block, `nginx -t` passed, reload —
+then the jar: uploaded as `.new`, SHA-256 matched, swapped, `systemctl restart pgc-mcp`, answering
+in 6 seconds. `tomcat` and `nginx` stayed active. Disk 86%, 1.2 GB free.
+
+Verified from outside: site 200, `/webapi/courses` 200, `/mcp` 401 with the same challenge, the
+resource metadata lists `https://pgcgolf.club/mcp`, the new document answers 200 with that issuer,
+Cognito's endpoints and S256, and the project's own client resolves it on the first request.
+
+**Not verified:** a tool call with a real token against the new jar (the last token had expired and
+a new one needs a browser sign-in), MCPJam's Connect itself, and Claude Desktop.
+
+**Still needed on the Cognito side:** MCPJam's callback URLs are not on the test app client's
+allow-list (only `http://localhost:8765/callback` is), so the login will stop at
+`redirect_mismatch` until they are added.
+
+**Rollback:**
+`sudo cp /etc/nginx/nginx.conf.bak-20261110-pre-as-metadata /etc/nginx/nginx.conf && sudo nginx -t && sudo systemctl reload nginx`
+and
+`cd /opt/pgc-mcp && cp -p pgc-spring-mcp.jar.bak-20261110-pre-as-metadata pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
+Do both or neither: the old jar with the new route is harmless, the new jar without the route
+sends clients to a 404.
+
+---
+
+### STEP53 — PGCPyMcp: the PGCSpringMCP server ported to Python ✅ built, not deployed (2026-11-10)
+
+**Asked for:** "lets create another project called PGCPyMcp and implement it with python".
+
+**What it is:** a new sibling project, `pgc-ai/PGCPyMcp`, with the same four read-only tools
+(`list_courses`, `list_players`, `find_player`, `get_player_profile`) over stateless Streamable
+HTTP behind a validated Cognito access token. Server and tests only: no client, no deployment.
+Python 3.12, MCP Python SDK 2.3 (`MCPServer`), PyJWT, httpx, uvicorn, managed with `uv`. It
+listens on `127.0.0.1:8901` so it can run beside the Java server on `8900`.
+
+**How it is built:** on the SDK's own authentication path rather than around it. The SDK takes
+the bearer token, issues the `401` challenge, serves the RFC 9728 document and enforces the
+scope; this project supplies the `TokenVerifier` (RS256 signature against the pool's key set,
+`iss`, `exp`, `token_use=access`, `aud` contains the resource id, never falling back to
+`client_id`), the RFC 8414 document republished from Cognito with the issuer rewritten and S256
+added, the `/webapi/`-only GET choke point, unconditional `phone`/`email` stripping, and the
+access-policy seam. Tool names, argument names, descriptions and answers match the Java server
+word for word.
+
+**Decisions made without asking:** `serverInfo.name` is `pgc-golf-py` so the two servers can be
+told apart; the bind address is a constant, not a setting; the project is not installed as a
+package (on this Mac the virtualenv's `.pth` file carries the hidden flag and Python 3.12 skips
+it), so commands run from the project directory.
+
+**Differences from the Java server a client could notice:** the `tools.read` scope is enforced
+(`403`), not just advertised; no clock-skew leeway on `exp`; unknown paths answer `404`, not
+`401`; the challenge carries `error="invalid_token"` even with no token; the challenge URL is
+derived from the resource id; `Host` must be a loopback name or the public host (`421`
+otherwise, checked after authentication). All listed in the project's README.
+
+**Verification:** tests first throughout. 197/197 green, no network. The security checks were
+each removed in turn to confirm a test fails: the audience check, `token_use`, the issuer, the
+key-set refetch cooldown, redirect-following, the policy deny, the `Host` allow-list, the scope
+requirement and the verifier's audience wiring all did. (Removing the up-front `alg` header
+check alone fails nothing, because the decode call pins RS256 as well.) Then run on a real
+socket against the throwaway test pool: `/mcp` without a token `401` with the challenge, both
+open documents `200` with Cognito's real endpoints and S256, a garbage token refused and logged,
+listening on loopback only.
+
+**Not verified:** a tool call with a real Cognito token; any MCP client connecting; running
+behind nginx.
+
+**State:** nothing committed (the repository has no commits yet), nothing pushed, nothing
+deployed, production untouched.
+
+### STEP54 — PGCSpringMCP: eight more tools, twelve in all ✅ deployed (2026-11-10)
+
+**Asked for:** "add more tools to the mcp spring mcp server, such as get player score history,
+get standings etc."
+
+**Built:** the Spring server now covers the same ground as the stdio PGCMcp server, plus
+`list_players`. Eight tools added, each test-first:
+
+| Tool | Reads | Class |
+|---|---|---|
+| `get_player_score_history` | `/webapi/players/{id}/score-history` | `PgcTools` |
+| `get_standings` | `/webapi/points/standings` | `ClubTools` (new) |
+| `get_club_news` | `/webapi/news` | `ClubTools` |
+| `list_events` | `/webapi/events` | `CompetitionTools` (new) |
+| `get_event_scores` | `/webapi/points/game-scores/event/{id}` | `CompetitionTools` |
+| `get_event_rewards` | the same document's `rewards` | `CompetitionTools` |
+| `list_tournaments` | `/webapi/tournaments` | `CompetitionTools` |
+| `get_tournament_totals` | `/webapi/points/game-scores/tournament/{id}` | `CompetitionTools` |
+
+`ToolSupport` (new) holds what the three tool classes share: JSON, limits, the failure
+sentences. All three are registered in `PgcSpringMcpApplication.pgcToolCallbacks`, so the access
+policy wraps the new tools without further change. Every path is still a constant or a constant
+plus a numeric id, GET only, under `/webapi/`, nothing under `/admin/`.
+
+**Decisions made without asking** (where the Spring tools differ from PGCMcp's):
+- a season is matched by part of its name (`2025` finds `PGC 2025`); an unknown one gets a
+  sentence listing the seasons that exist;
+- `get_player_score_history` returns the current season by default, says so in `scope`, and
+  keeps the whole-history figures apart under `allSeasons`;
+- upstream's `front9`/`back9`/`hole1..18` on an event score are strokes relative to par, so they
+  leave as `front9ToPar`/`back9ToPar`/`holesToPar`;
+- `get_event_rewards` reads the rewards embedded in the event-scores document, never
+  `/webapi/rewards?eventId=`, which nests each winner's whole player row;
+- `list_tournaments` takes its dates from the rounds, because the hand-typed `endDate` is wrong
+  on live data;
+- `get_tournament_totals` lists players who missed a round after those who played them all
+  (`complete:false`), omits `totalNet` where a round has no net, and flags a name that appears
+  twice in one round (`ambiguousName`) since scores carry no player id;
+- news posts with `isActive:false` are left out;
+- lists that are cut off (`get_standings` 20, `get_club_news` 5, `list_events` 10) answer with an
+  object carrying the full count and a `note`.
+
+**Verification:** 153/153 green (88 before), no network. Ten mutations each failed a test and
+were reverted: withdrawn news kept, whole standings row passed through, truncation note dropped,
+dense ranking, event 404 reported as a server fault, holes always included, nested course passed
+through, upstream `endDate` trusted, partial totals ranked on gross alone, missing net counted
+as zero. Then each new tool was called once against the live club API from a throwaway test
+(deleted afterwards): all returned the expected shape with no `phone`/`email`; default answers
+ran from 0.4 KB (`list_tournaments`) to 4.3 KB (`get_event_scores`, 26 players), and the whole
+109-row standings table is 11.6 KB.
+
+**Not verified:** the new tools through the running server with a real Cognito token; any MCP
+client (MCPJam, Claude Desktop) listing twelve tools.
+
+**Docs:** README (tool tables, counts, layout), `docs/why-large-responses-are-a-failure.md`,
+and the comments that named a tool count. `docs/oauth-wire-log.md` and `docs/cognito-setup.md`
+still say "three tools" where they record what was captured at the time; left as records.
+
+**State:** committed on `feature-phase2-oauth` as `03ccfa1`, pushed, and added to the open
+pull request (`ouyanone/PGCSpringMcp` #1, description updated to cover it); **deployed**
+2026-11-10 21:14 EST (02:14 UTC on the 11th). The first attempt was refused by the session's
+permission mode; the owner then asked for the deploy directly. Jar built from `03ccfa1` on
+Java 21 (sha256 `d5d4dc4f…c3beb9`, verified on the server before the swap). Backup taken first:
+`/opt/pgc-mcp/pgc-spring-mcp.jar.bak-20261110-pre-twelve-tools` (sha256 `ac8b8b23…2037de`, the
+four-tool jar). Only `pgc-mcp` was restarted; Tomcat and nginx were not touched.
+
+**After the deploy:** the service log says `Registered tools: 12`, started in 3.7 s;
+`pgc-mcp`, `tomcat` and `nginx` all active; `POST /mcp` without a token answers `401` with the
+challenge naming `https://pgcgolf.club/...`; the site answers `200`; both metadata documents
+answer, the second with the `/mcp` issuer and `S256`.
+
+**Rollback:** `cd /opt/pgc-mcp && cp -p pgc-spring-mcp.jar.bak-20261110-pre-twelve-tools
+pgc-spring-mcp.jar && sudo systemctl restart pgc-mcp`.
+
+**Still not verified:** a tool call with a real Cognito token against the deployed server; an
+MCP client listing twelve tools. PGCMcp and PGCPyMcp untouched.
+
+### STEP55 — A learning plan for LangChain and LangGraph 📝 (2026-11-10)
+
+**Asked for:** a plan for learning LangChain and LangGraph, using PGC Golf as the sample, saved as
+a Markdown file for future reference.
+
+**Written:** `PGCLangLab/LEARNING-PLAN.md` (new folder, nothing else in it yet). Eight stages, from
+setup through structured output, tools and `create_agent` over the PGC MCP tools, a hand-built
+LangGraph agent, memory, an event-recap workflow with human approval, evaluation, and a capstone
+passing a member's Cognito token through to `https://pgcgolf.club/mcp`. Python chosen over Java
+because LangGraph is Python-first.
+
+**State:** not a git repository, nothing committed. No code written; Stage 0 not started.
+
+### STEP56 — Chatbot design written 📝 (2026-11-15)
+
+**Asked for:** build a chatbot for pgcgolf.club. Brainstormed first; nothing built.
+
+**Owner decided:**
+- logged-in members only;
+- club questions answered from the MCP tools, general golf kept short, everything else declined;
+- any player's details may be asked about;
+- "me" resolves to the member's own player record;
+- replies in the question's language (Chinese included);
+- the last 3 exchanges are kept;
+- $10/month budget;
+- placement option C (a 💬 icon in the top bar opens a right-side panel);
+- the member's own Cognito token reaches the MCP server;
+- the MCP server moves from the test pool (`us-east-1_kfC3n4qy7`) to "pgc new pool"
+  (`us-east-1_XDeOxg5Ea`) through additive pool changes.
+
+**Written:** `docs/superpowers/specs/2026-11-15-pgc-chatbot-design.md`, awaiting the owner's
+approval. Not committed.
+
+**Found:** the MCP server (`/etc/pgc-mcp.env`) trusts the test pool, so members' tokens would be
+rejected today. Local development logs in through the production pool and app client, so the
+pool additions must come before local testing.
+
+**State:**
+- no code;
+- no Cognito, MCP server or database changes;
+- the Anthropic API account is still to be created by the owner.
+
+### STEP57 — MCP server moved to "pgc new pool" 🔁 (2026-11-15)
+
+**Asked for:** chatbot step 0. Switch the MCP server from pgcspringpool to "pgc new pool" and
+prove it with MCPJam before writing any chatbot code. The design's rollout section was updated
+to match.
+
+**Owner, in the AWS console (additive):**
+- added resource server `https://pgcgolf.club/mcp` with scope `tools.read` to "pgc new pool";
+- created a new app client, `mcpjam-test` (`6ct6edprh3krut3n3oc4n4s7ki`), with that scope;
+- left the website's app client untouched.
+
+**Pre-check, before the switch, with no sign-in:** the authorize request with the real scope and
+`resource=` reached the sign-in page. A made-up callback gave `redirect_mismatch`, and a made-up
+scope gave `invalid_scope`. So the client, scope and callback (`http://localhost:6274/oauth/callback`)
+are set up correctly.
+
+**Switch:**
+- backed up to `/etc/pgc-mcp.env.bak-20261115-pre-new-pool` and checked the copy with `cmp`;
+- changed the issuer and JWKS from `us-east-1_kfC3n4qy7` to `us-east-1_XDeOxg5Ea` (two lines);
+- restarted `pgc-mcp`; `/mcp` answered 401 after 6 seconds;
+- tomcat and nginx stayed active.
+
+**Verified from outside:**
+- the site returns 200;
+- `/mcp` returns 401 with the resource-metadata challenge;
+- the authorization-server metadata now names the "pgc new pool" endpoints, with S256.
+
+**Rollback:**
+`sudo cp -p /etc/pgc-mcp.env.bak-20261115-pre-new-pool /etc/pgc-mcp.env && sudo systemctl restart pgc-mcp`.
+
+**Verified by the owner in MCPJam:** works end to end against the live server.
+- Settings: protocol 2025-11-25, a pre-registered client, the scope set explicitly, and a sign-in
+  with the owner's own pgcgolf.club account.
+- The server rejects any token without `aud = https://pgcgolf.club/mcp`, so a working tool call
+  means "pgc new pool" honours `resource=` (RFC 8707), as the test pool did.
+- One extra console step was needed: the first sign-in showed "Login pages unavailable" until a
+  managed-login style was created for the `mcpjam-test` app client (Branding → Managed login).
+  New app clients in this pool need one.
+
+### STEP58 — Club assistant built (plan Tasks 1–8) 🛠 (2026-11-16)
+
+**Asked for:** build the chatbot from the approved design and plan
+(`docs/superpowers/plans/2026-11-15-pgc-chatbot.md`), inline, with one fresh review at the end.
+
+**Built (PGCServer `85ba9cb..ca8ae2e`, 7 commits; PGCUI `8d3f9e96`):**
+- the website login asks for `https://pgcgolf.club/mcp/tools.read` and sends `resource=`;
+- the member's access token is taken from the session and refreshed through
+  `OAuth2AuthorizedClientManager`;
+- three tables (`ddl/chat.sql`): last 3 exchanges, daily counts, monthly spend in DECIMAL;
+- "me" is resolved by login email → exactly one Player;
+- a hand-written MCP client sends the member's bearer token on every request. The SDK needs newer
+  Reactor and Jackson than Boot 3.3; the owner declined Boot 4 because production runs
+  Tomcat 10.1.30;
+- the Claude tool loop: Anthropic Java SDK 3.2.0, `claude-sonnet-5-5`, effort low,
+  `max_tokens` 2048, at most 5 tool calls; thinking blocks are replayed unchanged;
+- `GET /webapi/chat/history` and `POST /webapi/chat` (JSON only, members only);
+- a toolbar icon and slide-in panel in Angular, with answers rendered through the sanitizer.
+
+**Tests:**
+- backend 140/140 on JDK 21. The default `mvn` uses JDK 25, where Mockito cannot mock classes;
+  `./mvnw` is broken because `.mvn/wrapper` is missing;
+- UI 19/19 targeted specs. The other 27 generated UI specs already failed before this work;
+- mutation checks on the SQL (zero floor, member scope, decimal add), the startup price check,
+  and the XSS sanitizer.
+
+**Local DB:** `chat.sql` applied to local MySQL 9.7 through JDBC; there is no `mysql` CLI.
+
+**Not done yet:**
+- Task 9: the owner ticks `tools.read` on the website app client, provides an API key, and
+  tests end to end;
+- Task 10: production rollout;
+- the final review is done:
+  - verdict: with fixes; no critical issues;
+  - 4 important issues fixed: a 35 s question deadline, tokens stored in the HTTP session,
+    the signin cause logged, and Enter during Chinese input no longer sending;
+  - a precondition added to the Task 10 rollout;
+  - 10 minor issues deferred, listed in the ledger;
+  - suite 144/144, UI specs 21/21.
+
+**Agreed follow-up:** learn Spring AI in PGCServer after a Boot 3.5 upgrade.
+
+### STEP59 — Club assistant tested end to end locally ✅ (2026-11-16)
+
+**Owner ran plan Task 9:**
+- the six test questions behaved as designed: own standings, another player, Chinese,
+  a short general-golf answer, off-topic declined, history kept to 3;
+- after more than an hour signed in, the next question still answered, so the refresh token
+  works and the refreshed token keeps `aud`;
+- the backend log lines carry no tokens, emails or question text.
+
+**Measured locally:** 3 questions cost $0.042912 (19,006 input / 490 output tokens), about
+1.4 ¢ per question, or roughly 700 questions a month for $10. Input dominates: the 12 tool
+schemas and tool results go with every step.
+
+**Snag:** the owner's `spring-boot:run` failed on duplicate classes (`… 2.class`) in `target/`,
+caused by concurrent builds and/or iCloud Documents sync. `mvn clean` fixed it.
+
+### STEP60 — Club assistant deployed to production 🚀 (2026-11-16)
+
+**Asked for:** plan Task 10, with the owner's "go" for the tables, the build and the deploy.
+
+**Done, in order:**
+1. **Precondition:** the website app client allows `tools.read`, shown by the Task 9 local sign-in
+   through the same client.
+2. **Database backup:** `db-dump/pgc-20261116-002909-server-backup.sql.gz`, 13 tables, trailer
+   present.
+3. **API key:** the owner created `pgcgolf-chatbot-prod` ("Somewhere else", a plain key) and
+   wrote `/etc/pgc/chatbot.properties` on the server, so the key never passed through chat. It
+   was created world-readable; tightened to `0600 root:root`, and Tomcat runs as root.
+4. **Tables:** `ddl/chat.sql` applied on production MySQL 8.4.3, taking the schema from 13 to
+   16 tables, all three new ones empty.
+5. **Build:** UI `6eed4048` → `static/`; WAR built on JDK 21 with `mvn clean package`. It is
+   108 MB (was about 66 MB) because `anthropic-java-core` alone is 37 MB; it holds one main
+   bundle. SHA-256 starts `4b66141799215b9c`.
+6. **Deploy:** Tomcat stopped; the old WAR archived as `ROOT.war.11162026_0037`; the new WAR in
+   place; Tomcat started and deployed it in 11.9 s, with no SEVERE or ERROR lines.
+
+**Verified from outside:**
+- `/` and `/webapi/news` return 200;
+- `/webapi/auth/status` shows logged out;
+- logged out, `/webapi/chat` and `/webapi/chat/history` return 401;
+- `/mcp` without a token returns 401;
+- the login redirect carries `tools.read` and `resource=`;
+- the new bundle is served;
+- tomcat, nginx and pgc-mcp are all active;
+- the disk has 954 MB free (89% used).
+
+**Rollback:**
+`sudo systemctl stop tomcat; sudo mv $T/webapps/ROOT.war /tmp/ROOT.war.chatbot; sudo rm -rf $T/webapps/ROOT;`
+`sudo mv $T/webapps/ROOT.war.11162026_0037 $T/webapps/ROOT.war; sudo systemctl start tomcat`
+(`T=/myApp/apache-tomcat-10.1.30`). The tables can stay, since the old WAR ignores them; to
+remove them, `DROP TABLE chat_exchange, chat_daily_count, chat_monthly_spend;`. Delete
+`/etc/pgc/chatbot.properties` to remove the key.
+
+**Noticed, not acted on:** `webapps/` holds about 50 archived WARs (roughly 3.4 GB), most of the
+disk.
+
+**Verified in production by the owner:** the chatbot works. The database recorded 10
+questions, all `outcome=answered`, for one member; 3 history rows; spend 2026-11 = $0.217832
+(87,706 input / 4,242 output tokens). That is about 2.2 ¢ a question, or roughly 450 questions a
+month for $10.
+
+### STEP61 — Committed, pushed, pull requests opened 📬 (2026-11-16)
+
+**Asked for:** "commit and push and open pr".
+
+- PGCServer: `75bf16e` (deployed `static/` bundle, STEP59–60, plan ledger). `feature-07182026` was
+  pushed and is level with origin. PR #3 into `main` covers 25 commits (STEP47–61; STEP40–46 were merged earlier by PR #2), with the
+  chatbot as the headline.
+- PGCUI: `feature-07182026` was pushed (`b5338215..6eed4048`). PR #2 into `main` covers 15
+  commits. The two tracked `dist/` files changed by the deploy build were left uncommitted on
+  purpose, because the deploy builds `dist/` fresh.
+- Both PRs say the branch is already in production, so merging records reality.

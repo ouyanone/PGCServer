@@ -20,6 +20,9 @@ public interface PlayerRepository extends CrudRepository<Player, Long>{
 
 	List<Player> findByIsActiveTrueOrderByPgcPointsDesc();
 
+	/** The club assistant's "me": the login email, matched case-insensitively. */
+	List<Player> findByEmailIgnoreCase(String email);
+
 	@Modifying
 	@Query("UPDATE Player p SET p.pgcPoints = :points WHERE p.id = :id")
 	void updatePgcPoints(@Param("id") Long id, @Param("points") int points);
