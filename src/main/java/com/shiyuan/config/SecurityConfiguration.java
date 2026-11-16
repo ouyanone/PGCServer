@@ -3,13 +3,14 @@ package com.shiyuan.config;
 import java.util.List;
 
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
@@ -37,7 +38,9 @@ public class SecurityConfiguration {
 	}
 
 	@Bean
-	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+	public SecurityFilterChain filterChain(HttpSecurity http,
+			ClientRegistrationRepository registrations,
+			@Value("${pgc.chat.mcp-resource:https://pgcgolf.club/mcp}") String mcpResource) throws Exception {
 		http
 			.cors(cors -> cors.configurationSource(corsConfigurationSource()))
 			.csrf(AbstractHttpConfigurer::disable)
@@ -53,7 +56,10 @@ public class SecurityConfiguration {
 					(request, response, authException) ->
 						response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized"),
 					new AntPathRequestMatcher("/webapi/**")))
-			.oauth2Login(Customizer.withDefaults())
+			// The login also asks for a token addressed to the MCP server (resource= / aud), so the
+			// club assistant can call the MCP tools as the signed-in member.
+			.oauth2Login(login -> login.authorizationEndpoint(endpoint -> endpoint
+				.authorizationRequestResolver(new ResourceParameterResolver(registrations, mcpResource))))
 			.logout(logout -> logout.logoutSuccessUrl("/"));
 		return http.build();
 	}
