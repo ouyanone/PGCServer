@@ -1920,3 +1920,71 @@ passing a member's Cognito token through to `https://pgcgolf.club/mcp`. Python c
 because LangGraph is Python-first.
 
 **State:** not a git repository, nothing committed. No code written; Stage 0 not started.
+
+### STEP56 — Chatbot design written 📝 (2026-11-15)
+
+**Asked for:** build a chatbot for pgcgolf.club. Brainstormed first; nothing built.
+
+**Owner decided:**
+- logged-in members only;
+- club questions answered from the MCP tools, general golf kept short, everything else declined;
+- any player's details may be asked about;
+- "me" resolves to the member's own player record;
+- replies in the question's language (Chinese included);
+- the last 3 exchanges are kept;
+- $10/month budget;
+- placement option C (a 💬 icon in the top bar opens a right-side panel);
+- the member's own Cognito token reaches the MCP server;
+- the MCP server moves from the test pool (`us-east-1_kfC3n4qy7`) to "pgc new pool"
+  (`us-east-1_XDeOxg5Ea`) through additive pool changes.
+
+**Written:** `docs/superpowers/specs/2026-11-15-pgc-chatbot-design.md`, awaiting the owner's
+approval. Not committed.
+
+**Found:** the MCP server (`/etc/pgc-mcp.env`) trusts the test pool, so members' tokens would be
+rejected today. Local development logs in through the production pool and app client, so the
+pool additions must come before local testing.
+
+**State:**
+- no code;
+- no Cognito, MCP server or database changes;
+- the Anthropic API account is still to be created by the owner.
+
+### STEP57 — MCP server moved to "pgc new pool" 🔁 (2026-11-15)
+
+**Asked for:** chatbot step 0. Switch the MCP server from pgcspringpool to "pgc new pool" and
+prove it with MCPJam before writing any chatbot code. The design's rollout section was updated
+to match.
+
+**Owner, in the AWS console (additive):**
+- added resource server `https://pgcgolf.club/mcp` with scope `tools.read` to "pgc new pool";
+- created a new app client, `mcpjam-test` (`6ct6edprh3krut3n3oc4n4s7ki`), with that scope;
+- left the website's app client untouched.
+
+**Pre-check, before the switch, with no sign-in:** the authorize request with the real scope and
+`resource=` reached the sign-in page. A made-up callback gave `redirect_mismatch`, and a made-up
+scope gave `invalid_scope`. So the client, scope and callback (`http://localhost:6274/oauth/callback`)
+are set up correctly.
+
+**Switch:**
+- backed up to `/etc/pgc-mcp.env.bak-20261115-pre-new-pool` and checked the copy with `cmp`;
+- changed the issuer and JWKS from `us-east-1_kfC3n4qy7` to `us-east-1_XDeOxg5Ea` (two lines);
+- restarted `pgc-mcp`; `/mcp` answered 401 after 6 seconds;
+- tomcat and nginx stayed active.
+
+**Verified from outside:**
+- the site returns 200;
+- `/mcp` returns 401 with the resource-metadata challenge;
+- the authorization-server metadata now names the "pgc new pool" endpoints, with S256.
+
+**Rollback:**
+`sudo cp -p /etc/pgc-mcp.env.bak-20261115-pre-new-pool /etc/pgc-mcp.env && sudo systemctl restart pgc-mcp`.
+
+**Verified by the owner in MCPJam:** works end to end against the live server.
+- Settings: protocol 2025-11-25, a pre-registered client, the scope set explicitly, and a sign-in
+  with the owner's own pgcgolf.club account.
+- The server rejects any token without `aud = https://pgcgolf.club/mcp`, so a working tool call
+  means "pgc new pool" honours `resource=` (RFC 8707), as the test pool did.
+- One extra console step was needed: the first sign-in showed "Login pages unavailable" until a
+  managed-login style was created for the `mcpjam-test` app client (Branding → Managed login).
+  New app clients in this pool need one.
