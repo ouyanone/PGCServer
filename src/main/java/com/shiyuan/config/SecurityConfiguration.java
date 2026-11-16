@@ -50,6 +50,8 @@ public class SecurityConfiguration {
 			.csrf(AbstractHttpConfigurer::disable)
 			.authorizeHttpRequests(authz -> authz
 				.requestMatchers("/webapi/admin/**").authenticated()
+				// The club assistant: signed-in members only.
+				.requestMatchers("/webapi/chat/**").authenticated()
 				// Submitting scores writes player_score rows and updates every player's
 				// running PGC handicap, so it requires a signed-in user. Reading scores
 				// (GET /webapi/event/score) stays public.
