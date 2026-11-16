@@ -2021,6 +2021,73 @@ are set up correctly.
 - Task 9: the owner ticks `tools.read` on the website app client, provides an API key, and
   tests end to end;
 - Task 10: production rollout;
-- the final review is running.
+- the final review is done:
+  - verdict: with fixes; no critical issues;
+  - 4 important issues fixed: a 35 s question deadline, tokens stored in the HTTP session,
+    the signin cause logged, and Enter during Chinese input no longer sending;
+  - a precondition added to the Task 10 rollout;
+  - 10 minor issues deferred, listed in the ledger;
+  - suite 144/144, UI specs 21/21.
 
 **Agreed follow-up:** learn Spring AI in PGCServer after a Boot 3.5 upgrade.
+
+### STEP59 — Club assistant tested end to end locally ✅ (2026-11-16)
+
+**Owner ran plan Task 9:**
+- the six test questions behaved as designed: own standings, another player, Chinese,
+  a short general-golf answer, off-topic declined, history kept to 3;
+- after more than an hour signed in, the next question still answered, so the refresh token
+  works and the refreshed token keeps `aud`;
+- the backend log lines carry no tokens, emails or question text.
+
+**Measured locally:** 3 questions cost $0.042912 (19,006 input / 490 output tokens), about
+1.4 ¢ per question, or roughly 700 questions a month for $10. Input dominates: the 12 tool
+schemas and tool results go with every step.
+
+**Snag:** the owner's `spring-boot:run` failed on duplicate classes (`… 2.class`) in `target/`,
+caused by concurrent builds and/or iCloud Documents sync. `mvn clean` fixed it.
+
+### STEP60 — Club assistant deployed to production 🚀 (2026-11-16)
+
+**Asked for:** plan Task 10, with the owner's "go" for the tables, the build and the deploy.
+
+**Done, in order:**
+1. **Precondition:** the website app client allows `tools.read`, shown by the Task 9 local sign-in
+   through the same client.
+2. **Database backup:** `db-dump/pgc-20261116-002909-server-backup.sql.gz`, 13 tables, trailer
+   present.
+3. **API key:** the owner created `pgcgolf-chatbot-prod` ("Somewhere else", a plain key) and
+   wrote `/etc/pgc/chatbot.properties` on the server, so the key never passed through chat. It
+   was created world-readable; tightened to `0600 root:root`, and Tomcat runs as root.
+4. **Tables:** `ddl/chat.sql` applied on production MySQL 8.4.3, taking the schema from 13 to
+   16 tables, all three new ones empty.
+5. **Build:** UI `6eed4048` → `static/`; WAR built on JDK 21 with `mvn clean package`. It is
+   108 MB (was about 66 MB) because `anthropic-java-core` alone is 37 MB; it holds one main
+   bundle. SHA-256 starts `4b66141799215b9c`.
+6. **Deploy:** Tomcat stopped; the old WAR archived as `ROOT.war.11162026_0037`; the new WAR in
+   place; Tomcat started and deployed it in 11.9 s, with no SEVERE or ERROR lines.
+
+**Verified from outside:**
+- `/` and `/webapi/news` return 200;
+- `/webapi/auth/status` shows logged out;
+- logged out, `/webapi/chat` and `/webapi/chat/history` return 401;
+- `/mcp` without a token returns 401;
+- the login redirect carries `tools.read` and `resource=`;
+- the new bundle is served;
+- tomcat, nginx and pgc-mcp are all active;
+- the disk has 954 MB free (89% used).
+
+**Rollback:**
+`sudo systemctl stop tomcat; sudo mv $T/webapps/ROOT.war /tmp/ROOT.war.chatbot; sudo rm -rf $T/webapps/ROOT;`
+`sudo mv $T/webapps/ROOT.war.11162026_0037 $T/webapps/ROOT.war; sudo systemctl start tomcat`
+(`T=/myApp/apache-tomcat-10.1.30`). The tables can stay, since the old WAR ignores them; to
+remove them, `DROP TABLE chat_exchange, chat_daily_count, chat_monthly_spend;`. Delete
+`/etc/pgc/chatbot.properties` to remove the key.
+
+**Noticed, not acted on:** `webapps/` holds about 50 archived WARs (roughly 3.4 GB), most of the
+disk.
+
+**Verified in production by the owner:** the chatbot works. The database recorded 10
+questions, all `outcome=answered`, for one member; 3 history rows; spend 2026-11 = $0.217832
+(87,706 input / 4,242 output tokens). That is about 2.2 ¢ a question, or roughly 450 questions a
+month for $10.
