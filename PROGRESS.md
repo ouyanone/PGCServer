@@ -2159,3 +2159,34 @@ production runs Tomcat 10.1.30 and Boot 4 needs Tomcat 11.
   `sudo systemctl start tomcat` (`T=/myApp/apache-tomcat-10.1.30`).
 - **Verified in production by the owner:** "checked the online site, its working".
 - **Not yet done:** commit and push of `feature-boot-3.5`.
+
+### STEP64 — Club assistant, Spring AI edition (the S button) 🅢 (2026-11-17)
+
+**Asked for:** "implement the chatbot using spring ai … exactly the same function … put a icon next to the current icon … letter S". This is for learning; the two bots share history, the daily limit and the budget.
+
+- **Design and plan:**
+  - `docs/superpowers/specs/2026-11-17-spring-ai-chatbot-design.md`
+  - `docs/superpowers/plans/2026-11-17-spring-ai-chatbot.md`
+- **Backend** (`feature-boot-3.5`), package `com.shiyuan.chat.springai`, Spring AI 1.1.8 through `spring-ai-bom`, no starters:
+  - `SpringAiModels`: a lazily built `AnthropicChatModel` (one attempt per call, 20 s timeout, tool execution off). A blank key doesn't stop start-up.
+  - `McpToolsSession`: a per-question MCP SDK 0.18.3 client sending the member's Bearer token. Its tools become `SyncMcpToolCallback`s. `StatusRecordingHttpClient` exists because the SDK hides the HTTP status, and a 401 must still mean "sign in again".
+  - `SpringAiChatAssistant`: Spring AI's user-controlled tool loop (`ChatModel` + `DefaultToolCallingManager`), with 5 tool calls and 35 s per question, priced per call.
+  - `SpringAiChatController`: `POST /webapi/chat/spring`, with the same flow as `/webapi/chat`. Its log line has `impl=springai`.
+- **UI** (PGCUI `feature-spring-ai-chat`, `c22198d2`): a circled **S** button next to 💬 opens the same panel, titled "Club Assistant (Spring AI)". Only one bot is open at a time.
+- **Tests:** PGCServer 176/176. PGCUI chat specs 30/30, and the production build exits 0.
+- **Spring AI 1.1.8 findings:**
+  - it drops Claude's thinking blocks between tool rounds (the API accepts the removed block);
+  - it can split one reply across several generations;
+  - `SyncMcpToolCallback` throws a plain `IllegalStateException` for a tool's error result;
+  - it can't set `output_config.effort`, so the S bot runs at the default effort.
+- **Deployed 2026-11-18 02:24 UTC** at the owner's request ("no hurry, just build and deploy. i will test on real server"), before the final review finished and without a local run with a real key:
+  - Database backed up to `db-dump/pgc-20261117-212425-server-backup.sql.gz` (16 tables, completed).
+  - Old WAR archived as `ROOT.war.11172026_2124` (the Boot 3.5.16 build).
+  - New WAR is 133 MB (it was 114). Spring AI brings WebFlux and Reactor, and the app still starts as a servlet app.
+  - Checks: the log shows Spring Boot v3.5.16 and the WAR deployed with no SEVERE lines; tomcat, nginx and pgc-mcp are active; the home page returns 200; `/webapi/chat/spring` without a login returns 401; the bundle `main.8d0ea1115722303a.js` is served.
+- **Rollback:** `sudo systemctl stop tomcat; sudo mv $T/webapps/ROOT.war /tmp/ROOT.war.springai; sudo rm -rf $T/webapps/ROOT;`
+  `sudo mv $T/webapps/ROOT.war.11172026_2124 $T/webapps/ROOT.war; sudo systemctl start tomcat`.
+- **Pending:**
+  - the owner tests the S bot in production, with a question that needs a tool;
+  - the final review's findings;
+  - pushing both branches.
