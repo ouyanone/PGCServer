@@ -6,6 +6,11 @@ import java.util.List;
 
 import org.springframework.ai.mcp.SyncMcpToolCallback;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.execution.ToolExecutionExceptionProcessor;
+import org.springframework.ai.tool.execution.ToolExecutionException;
+import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.ai.tool.metadata.ToolMetadata;
+import org.springframework.ai.chat.model.ToolContext;
 
 import com.shiyuan.chat.McpUnauthorizedException;
 import com.shiyuan.chat.McpUnavailableException;
@@ -70,12 +75,67 @@ public final class McpToolsSession implements AutoCloseable {
             throw translate(e, "tools/list", http.lastStatus());
         }
         return tools.tools().stream()
-                .<ToolCallback>map(t -> SyncMcpToolCallback.builder()
+                .<ToolCallback>map(t -> new FailuresAsToolExecution(SyncMcpToolCallback.builder()
                         .mcpClient(client)
                         .tool(t)
                         .prefixedToolName(t.name())
-                        .build())
+                        .build()))
                 .toList();
+    }
+
+    /**
+     * {@code SyncMcpToolCallback} throws a plain {@code IllegalStateException} when a tool returns
+     * an error result, and Spring AI's tool-calling manager only hands {@link ToolExecutionException}
+     * to the error processor. Wrapping every failure lets {@link #toolErrorProcessor} decide.
+     */
+    private static final class FailuresAsToolExecution implements ToolCallback {
+        private final ToolCallback delegate;
+
+        FailuresAsToolExecution(ToolCallback delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public ToolDefinition getToolDefinition() {
+            return delegate.getToolDefinition();
+        }
+
+        @Override
+        public ToolMetadata getToolMetadata() {
+            return delegate.getToolMetadata();
+        }
+
+        @Override
+        public String call(String toolInput) {
+            return call(toolInput, null);
+        }
+
+        @Override
+        public String call(String toolInput, ToolContext context) {
+            try {
+                return context == null ? delegate.call(toolInput) : delegate.call(toolInput, context);
+            } catch (ToolExecutionException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw new ToolExecutionException(delegate.getToolDefinition(), e);
+            }
+        }
+    }
+
+    /**
+     * How Spring AI's tool-calling manager should treat a failed tool call. A tool that answered
+     * (HTTP 200) with an error result goes back to Claude as the tool's reply, Spring AI's usual
+     * behaviour. A call the MCP server refused or failed (no 200) ends the question through
+     * {@link #translate}, so a 401 still means "sign in again".
+     */
+    public ToolExecutionExceptionProcessor toolErrorProcessor() {
+        return e -> {
+            if (http.lastStatus() == 200) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                return cause.getMessage() == null ? "Tool call failed." : cause.getMessage();
+            }
+            throw translate(e);
+        };
     }
 
     /**

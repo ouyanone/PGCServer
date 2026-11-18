@@ -26,6 +26,8 @@ public final class FakeMcpServer implements AutoCloseable {
     public volatile int status = 200;
     /** Status for tools/call only; the handshake and tools/list still succeed. */
     public volatile int toolsCallStatus = 200;
+    /** When set, every tools/call answers with an error result (isError), as the "broken" tool does. */
+    public volatile boolean toolsCallIsError = false;
     volatile boolean answerAsSse = false;
     private final HttpServer http;
 
@@ -59,7 +61,7 @@ public final class FakeMcpServer implements AutoCloseable {
                 case "tools/list" -> """
                         {"tools":[{"name":"get_standings","description":"Club standings",
                           "inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}}}}]}""";
-                case "tools/call" -> req.path("params").path("name").asText().equals("broken")
+                case "tools/call" -> toolsCallIsError || req.path("params").path("name").asText().equals("broken")
                         ? """
                           {"content":[{"type":"text","text":"Event 999 does not exist."}],"isError":true}"""
                         : """
