@@ -19,8 +19,8 @@ import java.util.Optional;
  */
 public class ChatAssistant {
 
-    static final String TOO_MANY_LOOKUPS = "I couldn't finish looking that up — please try a narrower question.";
-    static final String CANNOT_HELP = "Sorry, I can't help with that one.";
+    public static final String TOO_MANY_LOOKUPS = "I couldn't finish looking that up — please try a narrower question.";
+    public static final String CANNOT_HELP = "Sorry, I can't help with that one.";
 
     private final ModelGateway model;
     private final ChatPricing pricing;

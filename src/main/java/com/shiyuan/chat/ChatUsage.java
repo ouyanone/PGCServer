@@ -12,7 +12,7 @@ public final class ChatUsage {
     private long outputTokens;
     private BigDecimal cost = BigDecimal.ZERO;
 
-    void add(long in, long out, BigDecimal stepCost) {
+    public void add(long in, long out, BigDecimal stepCost) {
         inputTokens += in;
         outputTokens += out;
         cost = cost.add(stepCost);
