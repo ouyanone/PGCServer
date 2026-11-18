@@ -16,26 +16,34 @@ import com.sun.net.httpserver.HttpServer;
  * assistant uses, and records what each request carried. Not a real MCP server -- just enough
  * of the wire format to prove what the client sends and how it reads replies.
  */
-final class FakeMcpServer implements AutoCloseable {
+public final class FakeMcpServer implements AutoCloseable {
 
-    record Seen(String method, String authorization, String protocolVersion) {}
+    public record Seen(String method, String authorization, String protocolVersion) {}
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    final List<Seen> seen = new CopyOnWriteArrayList<>();
-    volatile int status = 200;
+    public final List<Seen> seen = new CopyOnWriteArrayList<>();
+    public volatile int status = 200;
+    /** Status for tools/call only; the handshake and tools/list still succeed. */
+    public volatile int toolsCallStatus = 200;
     volatile boolean answerAsSse = false;
     private final HttpServer http;
 
-    FakeMcpServer() throws IOException {
+    public FakeMcpServer() throws IOException {
         http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         http.createContext("/mcp", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) { // GET stream / DELETE session
+                exchange.sendResponseHeaders(405, -1);
+                exchange.close();
+                return;
+            }
             JsonNode req = JSON.readTree(exchange.getRequestBody());
             String method = req.path("method").asText();
             seen.add(new Seen(method, exchange.getRequestHeaders().getFirst("Authorization"),
                     exchange.getRequestHeaders().getFirst("MCP-Protocol-Version")));
-            if (status != 200) {
-                exchange.sendResponseHeaders(status, -1);
+            int reply = method.equals("tools/call") && toolsCallStatus != 200 ? toolsCallStatus : status;
+            if (reply != 200) {
+                exchange.sendResponseHeaders(reply, -1);
                 exchange.close();
                 return;
             }
@@ -77,11 +85,11 @@ final class FakeMcpServer implements AutoCloseable {
         http.start();
     }
 
-    String url() {
+    public String url() {
         return "http://127.0.0.1:" + http.getAddress().getPort() + "/mcp";
     }
 
-    long count(String method) {
+    public long count(String method) {
         return seen.stream().filter(s -> s.method().equals(method)).count();
     }
 
