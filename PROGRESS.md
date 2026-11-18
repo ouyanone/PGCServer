@@ -2186,7 +2186,15 @@ production runs Tomcat 10.1.30 and Boot 4 needs Tomcat 11.
   - Checks: the log shows Spring Boot v3.5.16 and the WAR deployed with no SEVERE lines; tomcat, nginx and pgc-mcp are active; the home page returns 200; `/webapi/chat/spring` without a login returns 401; the bundle `main.8d0ea1115722303a.js` is served.
 - **Rollback:** `sudo systemctl stop tomcat; sudo mv $T/webapps/ROOT.war /tmp/ROOT.war.springai; sudo rm -rf $T/webapps/ROOT;`
   `sudo mv $T/webapps/ROOT.war.11172026_2124 $T/webapps/ROOT.war; sudo systemctl start tomcat`.
+- **Verified in production by the owner:** "it worked". This settles the thinking-block risk: a
+  real Claude tool round with the thinking block dropped by Spring AI is accepted.
+- **Final review** (fresh reviewer): 0 Critical, 3 Important.
+  - Fixed in `b7907aa`, with tests that failed first; suite 179/179:
+    - a tool call with no reply no longer reuses an earlier 200;
+    - the deadline is checked before every tool call;
+    - an MCP 403 means "sign in again".
+  - **Not yet deployed.**
+  - Deferred minors are in the plan ledger.
 - **Pending:**
-  - the owner tests the S bot in production, with a question that needs a tool;
-  - the final review's findings;
-  - pushing both branches.
+  - deploy `b7907aa`;
+  - push both branches and open PRs.
