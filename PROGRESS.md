@@ -2193,8 +2193,9 @@ production runs Tomcat 10.1.30 and Boot 4 needs Tomcat 11.
     - a tool call with no reply no longer reuses an earlier 200;
     - the deadline is checked before every tool call;
     - an MCP 403 means "sign in again".
-  - **Not yet deployed.**
-  - Deferred minors are in the plan ledger.
-- **Pending:**
-  - deploy `b7907aa`;
-  - push both branches and open PRs.
+  - Deferred minors: in the PR description and the final message.
+- **Fixes deployed 2026-11-18 02:32 UTC** (asked for with "yes"):
+  - database backed up to `db-dump/pgc-20261117-213148-server-backup.sql.gz` (16 tables, completed);
+  - the old WAR archived as `ROOT.war.11172026_2131`;
+  - the log shows Spring Boot v3.5.16 and 0 SEVERE lines; tomcat, nginx and pgc-mcp are active; the home page returns 200; `/webapi/chat/spring` without a login returns 401.
+- **Pushed, with PRs into `main`:** PGCServer #4 (`feature-boot-3.5`, the Boot upgrade and the Spring AI bot) and PGCUI #3 (`feature-spring-ai-chat`, the S button).
