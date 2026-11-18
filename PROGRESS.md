@@ -2103,3 +2103,59 @@ month for $10.
   commits. The two tracked `dist/` files changed by the deploy build were left uncommitted on
   purpose, because the deploy builds `dist/` fresh.
 - Both PRs say the branch is already in production, so merging records reality.
+
+### STEP62 — Old WAR archives cleared on the server 🧹 (2026-11-16)
+
+**Asked for:** "lets clean the 50 old wars first". The owner chose to keep the 2 newest.
+
+- **Kept:**
+  - `ROOT.war.11162026_0037`, the pre-chatbot site and today's rollback (built 2026-10-22);
+  - `ROOT.war.10222026_1532`, one step further back;
+  - the live `ROOT.war` and its exploded `ROOT/`.
+- **Deleted:** the other 48 dated copies (2025 through 2026-10-21), about 3.2 GB. The list was
+  dry-run first (48 files, none of them a keeper or the live WAR), then removed with the same
+  `find … -delete` filter.
+- **Disk:** 7.0 G used, 954 MB free (89%) → 4.4 G used, 3.6 GB free (56%).
+- Tomcat was untouched and stayed active; the site returns 200.
+- **Noticed:** `webapps/shiyuan_db_dump_01262025.sql` (203 bytes) is not an app; Tomcat ignores it.
+
+### STEP63 — Spring Boot 3.3.5 → 3.5.16 ⬆️ (2026-11-17)
+
+**Asked for:** "lets upgrade pgcserver to spring boot 3.5.16". This is the first step towards
+Spring AI (Spring AI 1.1.x needs Boot 3.4 or 3.5). Boot 4 stays off the table, because
+production runs Tomcat 10.1.30 and Boot 4 needs Tomcat 11.
+
+- **Branch:** `feature-boot-3.5`, cut from `feature-07182026` at `43b5748`, so PR #3 is
+  untouched.
+- **Change:** one line in `pom.xml`, the parent version. No code or property changes were
+  needed.
+- **Resolved versions:**
+  - Spring Framework 6.2.19, Spring Security 6.5.11, Hibernate 6.6.53;
+  - Jackson 2.21.4, Tomcat (embedded, `provided`) 10.1.55, mysql-connector-j 9.7.0;
+  - Anthropic SDK 3.2.0, unchanged and working on Jackson 2.21.
+- **Tests:** `mvn clean test -Dspring.profiles.active=local` on JDK 21 → 144 tests, 0 failures,
+  0 errors. That includes `contextLoads` and the Anthropic SDK loopback test.
+- **Property check:** `spring-boot-properties-migrator` was added for one run and then removed.
+  It reported no renamed keys, but it broke datasource loading in this project. The keys in use
+  (`spring.datasource.*`, `spring.jpa.*`, `spring.security.oauth2.client.*`,
+  `spring.servlet.multipart.*`, `spring.config.import`) are unchanged from 3.3 to 3.5.
+- **Production fit:** Boot 3.5 uses Servlet 6.0, which the server's Tomcat 10.1.30 provides.
+- **Noticed, not acted on:** Hibernate warns that `hibernate.dialect` (`MySQL5Dialect`) need not
+  be set.
+- **Deployed (2026-11-17, 19:56 UTC), asked for with "let build and push to aws":**
+  - The UI was not rebuilt. PGCUI is unchanged, and `static/` already held the deployed bundle
+    (`main.fca1d2e4c84ed027.js`).
+  - `mvn -DskipTests clean package` produced a 114 MB WAR with one `main.*.js`. Embedded Tomcat
+    is in `WEB-INF/lib-provided/`, which the server's Tomcat ignores.
+  - Database backed up first: `db-dump/pgc-20261117-145627-server-backup.sql.gz` (16 tables,
+    the dump completed).
+  - The old WAR was archived as `ROOT.war.11172026_1456` (the chatbot build on Boot 3.3.5).
+  - After the restart, the log shows `Spring Boot (v3.5.16)` and the WAR deployed with no
+    SEVERE lines. tomcat, nginx and pgc-mcp are all active.
+  - Probes: the home page returns 200; `/webapi/chat/history` without a login returns 401, as
+    expected; the MCP protected-resource metadata returns 200.
+- **Rollback:** `sudo systemctl stop tomcat; sudo mv $T/webapps/ROOT.war /tmp/ROOT.war.boot35;`
+  `sudo rm -rf $T/webapps/ROOT; sudo mv $T/webapps/ROOT.war.11172026_1456 $T/webapps/ROOT.war;`
+  `sudo systemctl start tomcat` (`T=/myApp/apache-tomcat-10.1.30`).
+- **Verified in production by the owner:** "checked the online site, its working".
+- **Not yet done:** commit and push of `feature-boot-3.5`.
