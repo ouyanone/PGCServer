@@ -68,6 +68,15 @@ public final class McpToolsSession implements AutoCloseable {
 
     /** The server's tools as Spring AI tool callbacks, named exactly as the server names them. */
     public List<ToolCallback> toolCallbacks() {
+        return toolCallbacks(() -> { });
+    }
+
+    /**
+     * As {@link #toolCallbacks()}, running {@code beforeEachCall} before every tool call -- the
+     * assistant's deadline check, so several tool calls in one round can't outrun it. What it
+     * throws propagates unchanged.
+     */
+    public List<ToolCallback> toolCallbacks(Runnable beforeEachCall) {
         McpSchema.ListToolsResult tools;
         try {
             tools = client.listTools();
@@ -75,7 +84,7 @@ public final class McpToolsSession implements AutoCloseable {
             throw translate(e, "tools/list", http.lastStatus());
         }
         return tools.tools().stream()
-                .<ToolCallback>map(t -> new FailuresAsToolExecution(SyncMcpToolCallback.builder()
+                .<ToolCallback>map(t -> new FailuresAsToolExecution(beforeEachCall, SyncMcpToolCallback.builder()
                         .mcpClient(client)
                         .tool(t)
                         .prefixedToolName(t.name())
@@ -87,11 +96,15 @@ public final class McpToolsSession implements AutoCloseable {
      * {@code SyncMcpToolCallback} throws a plain {@code IllegalStateException} when a tool returns
      * an error result, and Spring AI's tool-calling manager only hands {@link ToolExecutionException}
      * to the error processor. Wrapping every failure lets {@link #toolErrorProcessor} decide.
+     * The recorded status is reset first, so it describes this call only: a call that gets no
+     * reply (timeout, dropped connection) must not inherit the 200 of an earlier request.
      */
-    private static final class FailuresAsToolExecution implements ToolCallback {
+    private final class FailuresAsToolExecution implements ToolCallback {
+        private final Runnable beforeEachCall;
         private final ToolCallback delegate;
 
-        FailuresAsToolExecution(ToolCallback delegate) {
+        FailuresAsToolExecution(Runnable beforeEachCall, ToolCallback delegate) {
+            this.beforeEachCall = beforeEachCall;
             this.delegate = delegate;
         }
 
@@ -112,6 +125,8 @@ public final class McpToolsSession implements AutoCloseable {
 
         @Override
         public String call(String toolInput, ToolContext context) {
+            beforeEachCall.run();
+            http.reset();
             try {
                 return context == null ? delegate.call(toolInput) : delegate.call(toolInput, context);
             } catch (ToolExecutionException e) {
@@ -157,8 +172,9 @@ public final class McpToolsSession implements AutoCloseable {
         if (t instanceof McpUnavailableException u) {
             return u;
         }
-        if (status == 401) {
-            return new McpUnauthorizedException("mcp " + step + ": HTTP 401");
+        // 401 and 403 both mean the token won't do -- as in McpGateway: sign in again.
+        if (status == 401 || status == 403) {
+            return new McpUnauthorizedException("mcp " + step + ": HTTP " + status);
         }
         return new McpUnavailableException("mcp " + step + ": "
                 + (status >= 400 ? "HTTP " + status : rootType(t)));

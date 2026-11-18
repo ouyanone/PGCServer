@@ -35,7 +35,12 @@ final class StatusRecordingHttpClient extends HttpClient {
         this.delegate = delegate;
     }
 
-    /** The last POST response status, or 0 before any. */
+    /** Forget the last status, so the next read reflects only the request made after this. */
+    void reset() {
+        lastStatus.set(0);
+    }
+
+    /** The last POST response status, or 0 before any (or since {@link #reset()}). */
     int lastStatus() {
         return lastStatus.get();
     }

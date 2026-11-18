@@ -28,6 +28,7 @@ import com.shiyuan.chat.ChatPricing;
 import com.shiyuan.chat.ChatUsage;
 import com.shiyuan.chat.FakeMcpServer;
 import com.shiyuan.chat.McpUnauthorizedException;
+import com.shiyuan.chat.McpUnavailableException;
 import com.shiyuan.chat.ModelUnavailableException;
 
 class SpringAiChatAssistantTest {
@@ -198,6 +199,36 @@ class SpringAiChatAssistantTest {
     void mcp401_unauthorized() {
         mcp.status = 401;
         assertThatThrownBy(this::ask).isInstanceOf(McpUnauthorizedException.class);
+    }
+
+    /** Review Important #1: a call with no HTTP reply must not reuse the 200 from tools/list. */
+    @Test
+    void toolCallWithNoReply_unavailable_notSentToClaude() {
+        mcp.toolsCallDropsConnection = true;
+        claude.reply(toolUse("toolu_1", "get_standings", "{}", "", 100, 10), text("x", "end_turn", 1, 1));
+        assertThatThrownBy(this::ask).isInstanceOf(McpUnavailableException.class);
+        assertThat(claude.requests).hasSize(1);
+    }
+
+    /** Review Important #3: the deadline is checked before every tool call, not once per round. */
+    @Test
+    void deadlinePassedBetweenParallelToolCalls_modelUnavailable() {
+        Instant t0 = Instant.parse("2026-11-17T12:00:00Z");
+        // giveUpAt, loop check, pre-round check, first call's check: on time; second call's: late.
+        Deque<Instant> times = new ArrayDeque<>(List.of(t0, t0, t0, t0, t0.plusSeconds(40)));
+        Clock clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneId.of("UTC"); }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return times.size() > 1 ? times.poll() : times.peek(); }
+        };
+        claude.reply("""
+                {"id":"msg_p","type":"message","role":"assistant","model":"claude-sonnet-5-5",
+                 "content":[{"type":"tool_use","id":"toolu_a","name":"get_standings","input":{}},
+                            {"type":"tool_use","id":"toolu_b","name":"get_standings","input":{}}],
+                 "stop_reason":"tool_use","stop_sequence":null,
+                 "usage":{"input_tokens":100,"output_tokens":10}}""");
+        assertThatThrownBy(() -> ask(assistant(KEY, 5, clock))).isInstanceOf(ModelUnavailableException.class);
+        assertThat(mcp.count("tools/call")).isEqualTo(1);
     }
 
     @Test

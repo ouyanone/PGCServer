@@ -79,6 +79,13 @@ class McpToolsSessionTest {
     }
 
     @Test
+    void initialize403_isUnauthorized() {
+        mcp.status = 403;
+        assertThat(catchThrowable(() -> McpToolsSession.open(mcp.url(), TOKEN)))
+                .isInstanceOf(McpUnauthorizedException.class);
+    }
+
+    @Test
     void callAfter500_isUnavailable() {
         mcp.toolsCallStatus = 500;
         try (McpToolsSession session = McpToolsSession.open(mcp.url(), TOKEN)) {

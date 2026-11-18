@@ -28,6 +28,8 @@ public final class FakeMcpServer implements AutoCloseable {
     public volatile int toolsCallStatus = 200;
     /** When set, every tools/call answers with an error result (isError), as the "broken" tool does. */
     public volatile boolean toolsCallIsError = false;
+    /** When set, tools/call gets no HTTP reply at all: the connection is dropped. */
+    public volatile boolean toolsCallDropsConnection = false;
     volatile boolean answerAsSse = false;
     private final HttpServer http;
 
@@ -43,6 +45,10 @@ public final class FakeMcpServer implements AutoCloseable {
             String method = req.path("method").asText();
             seen.add(new Seen(method, exchange.getRequestHeaders().getFirst("Authorization"),
                     exchange.getRequestHeaders().getFirst("MCP-Protocol-Version")));
+            if (method.equals("tools/call") && toolsCallDropsConnection) {
+                exchange.close();
+                return;
+            }
             int reply = method.equals("tools/call") && toolsCallStatus != 200 ? toolsCallStatus : status;
             if (reply != 200) {
                 exchange.sendResponseHeaders(reply, -1);

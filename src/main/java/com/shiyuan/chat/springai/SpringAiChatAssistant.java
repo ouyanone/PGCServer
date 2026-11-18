@@ -74,7 +74,7 @@ public class SpringAiChatAssistant {
 
         try (McpToolsSession session = McpToolsSession.open(mcpUrl, accessToken)) {
             ToolCallingChatOptions options = ToolCallingChatOptions.builder()
-                    .toolCallbacks(session.toolCallbacks())
+                    .toolCallbacks(session.toolCallbacks(() -> checkDeadline(giveUpAt)))
                     .internalToolExecutionEnabled(false)
                     .build();
             ToolCallingManager tools = DefaultToolCallingManager.builder()
@@ -106,7 +106,7 @@ public class SpringAiChatAssistant {
                 ToolExecutionResult result;
                 try {
                     result = tools.executeToolCalls(prompt, response);
-                } catch (McpUnauthorizedException | McpUnavailableException e) {
+                } catch (McpUnauthorizedException | McpUnavailableException | ModelUnavailableException e) {
                     throw e;
                 } catch (RuntimeException e) {
                     throw session.translate(e);
