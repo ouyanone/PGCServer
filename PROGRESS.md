@@ -2234,16 +2234,26 @@ production runs Tomcat 10.1.30 and Boot 4 needs Tomcat 11.
   - `AdminApiController` `/api/admin/**`: tournaments, events, rewards, roster, grouping (refused
     once scores exist), late player, tee time, add/update player (never phone or email).
   - Both bots: `ChatRole` from the `profile=admin` sign-in claim. Non-admins never see an
-    `admin_` tool; admins get an extra prompt section, 15 tool calls and 55 s.
-  - Tests: 263/263 (was 179).
+    `admin_` tool; admins get an extra prompt section, 15 tool calls and 35 s.
+  - Tests: 275/275 (was 179).
 - **PGCSpringMCP** (branch `feature-admin-tools` from `feature-phase2-oauth`):
   - `WriteScopePolicy` (the first real `AccessPolicy`): `admin_*` tools need `tools.write`.
   - `PgcAdminApi`: POST/PUT/PATCH to `/api/admin/` only, with the caller's own token, no redirects.
   - `AdminTools` (9 `admin_*` tools) plus `list_seasons` and `get_event_groups`: 23 tools in all.
-  - Tests: 185/185 (was 153).
+  - Tests: 187/187 (was 153).
 - **Rulings that changed the plan:**
-  - admin deadline 55 s, not 90 s (nginx's 60 s timeout);
+  - admin deadline 35 s, not 90 s (nginx's 60 s timeout, plus up to 20 s for a call already started);
+  - event names are unique across the whole club (database key), so the bot is told to include the
+    tournament name;
   - seven grouping strategies (RANDOM too), not six;
   - website regrouping with an empty roster no longer deletes the old tees first.
   - The full list is in the final message to the owner.
-- **Not yet:** final review, deploy, the owner's TEST Cup walkthrough.
+- **Final review** (fresh reviewer): 1 Critical, 3 Important, plus 1 Minor re-graded to Important.
+  All five fixed, each with a test that failed first:
+  - an admin stopped part-way (limit, deadline or outage) is told what was done, never "try again later";
+  - duplicate events and rewards are refused;
+  - shorter MCP write timeouts;
+  - the website's empty-roster regroup answers 400 again.
+  Deferred minors: a null score breaks the "has scores" check (fails safe); `/api/admin` logs ids,
+  not who made the change; two identical creates sent at the same moment.
+- **Not yet:** deploy, the owner's TEST Cup walkthrough.
