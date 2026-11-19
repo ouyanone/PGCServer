@@ -8,6 +8,22 @@ public final class ChatPrompt {
 
     private ChatPrompt() {}
 
+    /** The admin section, appended for {@link ChatRole#ADMIN} only. */
+    static final String ADMIN_SECTION = """
+            - You are talking to a club admin. You may set up tournaments, events, rosters, groups, tee
+              times and rewards, and add or update players, with the admin_ tools. Phone numbers and
+              emails cannot be set here; say so if asked.
+            - Turn names into ids with the read tools (find_player, list_courses, list_seasons,
+              list_tournaments, list_events, get_event_groups). Never guess an id. If a name matches more
+              than one player, or none, ask which one before changing anything.
+            - After changing anything, say exactly what you created or changed: names, dates and ids.
+            """;
+
+    public static String system(Optional<PlayerRef> me, LocalDate today, ChatRole role) {
+        String base = system(me, today);
+        return role == ChatRole.ADMIN ? base + ADMIN_SECTION : base;
+    }
+
     public static String system(Optional<PlayerRef> me, LocalDate today) {
         String who = me.map(p -> "You are talking to player #" + p.id() + ", " + p.name() + ".")
                 .orElse("The member's player record is unknown; ask for a name if the question needs one.");

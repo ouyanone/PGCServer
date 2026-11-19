@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
 
 import com.shiyuan.chat.ChatPricing;
 import com.shiyuan.chat.ChatProperties;
+import com.shiyuan.chat.QuestionLimits;
 
 /** Beans for the Spring AI edition of the club assistant. Built by hand: no Spring AI starters. */
 @Configuration
@@ -31,6 +32,8 @@ public class SpringAiChatConfig {
         props.getPrice().forEach((model, p) ->
                 prices.put(model, new ChatPricing.Price(p.inputPerMtok(), p.outputPerMtok())));
         return new SpringAiChatAssistant(models, new ChatPricing(prices), props.getModel(),
-                props.getMaxToolCalls(), mcpUrl, chatClock, QUESTION_DEADLINE);
+                new QuestionLimits(props.getMaxToolCalls(), QUESTION_DEADLINE),
+                new QuestionLimits(props.getAdminMaxToolCalls(), Duration.ofSeconds(props.getAdminDeadlineSeconds())),
+                mcpUrl, chatClock);
     }
 }

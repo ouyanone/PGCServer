@@ -30,6 +30,13 @@ public final class FakeMcpServer implements AutoCloseable {
     public volatile boolean toolsCallIsError = false;
     /** When set, tools/call gets no HTTP reply at all: the connection is dropped. */
     public volatile boolean toolsCallDropsConnection = false;
+    /** When set, tools/list also offers an admin_ tool (as the real server does after this feature). */
+    public volatile boolean listsAdminTool = false;
+    /** What an admin_ tool call answers (the real tools start with one plain sentence). */
+    public volatile String adminCallText = "Created tournament TEST Cup (tournamentId 12), 2026-12-12 to 2026-12-13. {}";
+    /** tools/call number n and later (1-based) get HTTP 500, as a failing server would answer. */
+    public volatile int toolsCallFailFrom = Integer.MAX_VALUE;
+    private final java.util.concurrent.atomic.AtomicInteger toolsCalls = new java.util.concurrent.atomic.AtomicInteger();
     volatile boolean answerAsSse = false;
     private final HttpServer http;
 
@@ -49,7 +56,8 @@ public final class FakeMcpServer implements AutoCloseable {
                 exchange.close();
                 return;
             }
-            int reply = method.equals("tools/call") && toolsCallStatus != 200 ? toolsCallStatus : status;
+            boolean failNow = method.equals("tools/call") && toolsCalls.incrementAndGet() >= toolsCallFailFrom;
+            int reply = failNow ? 500 : method.equals("tools/call") && toolsCallStatus != 200 ? toolsCallStatus : status;
             if (reply != 200) {
                 exchange.sendResponseHeaders(reply, -1);
                 exchange.close();
@@ -66,8 +74,13 @@ public final class FakeMcpServer implements AutoCloseable {
                          "serverInfo":{"name":"fake","version":"0"}}""";
                 case "tools/list" -> """
                         {"tools":[{"name":"get_standings","description":"Club standings",
-                          "inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}}}}]}""";
-                case "tools/call" -> toolsCallIsError || req.path("params").path("name").asText().equals("broken")
+                          "inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}}}}%s]}"""
+                        .formatted(listsAdminTool ? """
+                        ,{"name":"admin_create_tournament","description":"Create a tournament",
+                          "inputSchema":{"type":"object","properties":{"name":{"type":"string"}}}}""" : "");
+                case "tools/call" -> req.path("params").path("name").asText().startsWith("admin_") && !toolsCallIsError
+                        ? "{\"content\":[{\"type\":\"text\",\"text\":" + quote(adminCallText) + "}],\"isError\":false}"
+                        : toolsCallIsError || req.path("params").path("name").asText().equals("broken")
                         ? """
                           {"content":[{"type":"text","text":"Event 999 does not exist."}],"isError":true}"""
                         : """
@@ -104,5 +117,9 @@ public final class FakeMcpServer implements AutoCloseable {
     @Override
     public void close() {
         http.stop(0);
+    }
+
+    private static String quote(String text) {
+        return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 }

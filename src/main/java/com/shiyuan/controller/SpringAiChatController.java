@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.shiyuan.chat.ChatBudget;
 import com.shiyuan.chat.ChatHistoryService;
 import com.shiyuan.chat.ChatLimits;
+import com.shiyuan.chat.ChatRole;
 import com.shiyuan.chat.ChatUsage;
 import com.shiyuan.chat.McpUnauthorizedException;
 import com.shiyuan.chat.McpUnavailableException;
@@ -97,7 +98,7 @@ public class SpringAiChatController {
             Optional<PlayerRef> me = players.resolve(member);
             String accessToken = tokens.accessToken(auth, request, response);
             String answer = assistant.answer(question, me, history.recent(sub), accessToken, usage,
-                    LocalDate.now(clock));
+                    LocalDate.now(clock), ChatRole.of(member));
             history.save(sub, question, answer);
             outcome = "answered";
             return ResponseEntity.ok(ChatResponse.answer(answer));

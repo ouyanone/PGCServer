@@ -2199,3 +2199,61 @@ production runs Tomcat 10.1.30 and Boot 4 needs Tomcat 11.
   - the old WAR archived as `ROOT.war.11172026_2131`;
   - the log shows Spring Boot v3.5.16 and 0 SEVERE lines; tomcat, nginx and pgc-mcp are active; the home page returns 200; `/webapi/chat/spring` without a login returns 401.
 - **Pushed, with PRs into `main`:** PGCServer #4 (`feature-boot-3.5`, the Boot upgrade and the Spring AI bot) and PGCUI #3 (`feature-spring-ai-chat`, the S button).
+
+## STEP65 — Lettered chat icons (PGCUI, 2026-11-18)
+- **Request:** the owner disliked the circled-S badge and asked for the original chat icon to carry a **J** (Anthropic Java SDK bot) and the Spring AI one an **S**. A preview with two options was shown; the owner chose **option A**.
+- **Change (PGCUI `feature-spring-ai-chat`, menubar only):**
+  - both buttons are now a solid `chat_bubble` Material icon with the letter overlaid in the toolbar blue (`.chat-letter`, `aria-hidden`);
+  - the aria-labels are unchanged, and the old `.chat-s-badge` style is removed.
+- **Tests:**
+  - `menubar.component.spec.ts` gained "chat icon is a bubble marked J", and the S test now checks the bubble and its letter;
+  - both failed before the change and pass after;
+  - the menubar, chat panel and chat service specs pass 31/31;
+  - the full UI suite has 26 failures in the old auto-generated "should create" specs, the same count without this change.
+- **Deployed 2026-11-18 16:29 UTC** (the owner said "deploy it"):
+  - database backed up to `db-dump/pgc-20261118-112812-server-backup.sql.gz` (16 tables, completed);
+  - the previous WAR archived as `ROOT.war.11182026_1129`;
+  - new WAR 133 MB, with one bundle, `main.6ad8908345ac18d0.js`;
+  - checks: the home page returns 200 and serves that bundle; 0 SEVERE lines; tomcat, nginx and pgc-mcp are active; `/webapi/chat/spring` without a login returns 401.
+- **Not yet committed or pushed** (PGCUI change, the bundled static files and this entry).
+
+## STEP66 — MCP admin tools (built 2026-11-18, not yet deployed)
+- **Request:** club admins set up tournaments by telling either club bot what they want; the MCP
+  server gets write tools that call new token-only admin APIs. Spec:
+  `docs/superpowers/specs/2026-11-18-mcp-admin-tools-design.md`; plan:
+  `docs/superpowers/plans/2026-11-18-mcp-admin-tools.md` (inline execution).
+- **Cognito (owner, production pool):** new scope `https://pgcgolf.club/mcp/tools.write` on the
+  `pgc-mcp` resource server, allowed on the website's app client. Verified with an authorize probe
+  (first attempt `invalid_scope`, fixed, then both scopes reach the login page).
+- **PGCServer** (branch `feature-mcp-admin-tools` from `feature-boot-3.5`):
+  - `ApiSecurityConfiguration`: a second, stateless chain for `/api/**` — Cognito bearer access
+    tokens only (`token_use=access`, issuer, signature); `/api/admin/**` needs `tools.write`. The
+    website's session login never opens `/api`. The website sign-in now also asks for `tools.write`.
+  - `GamePlanService`, `TournamentAdminService`: the website's admin logic moved out of the
+    controllers, shared with `/api/admin`; tests pin the website's behaviour.
+  - `AdminApiController` `/api/admin/**`: tournaments, events, rewards, roster, grouping (refused
+    once scores exist), late player, tee time, add/update player (never phone or email).
+  - Both bots: `ChatRole` from the `profile=admin` sign-in claim. Non-admins never see an
+    `admin_` tool; admins get an extra prompt section, 15 tool calls and 35 s.
+  - Tests: 275/275 (was 179).
+- **PGCSpringMCP** (branch `feature-admin-tools` from `feature-phase2-oauth`):
+  - `WriteScopePolicy` (the first real `AccessPolicy`): `admin_*` tools need `tools.write`.
+  - `PgcAdminApi`: POST/PUT/PATCH to `/api/admin/` only, with the caller's own token, no redirects.
+  - `AdminTools` (9 `admin_*` tools) plus `list_seasons` and `get_event_groups`: 23 tools in all.
+  - Tests: 187/187 (was 153).
+- **Rulings that changed the plan:**
+  - admin deadline 35 s, not 90 s (nginx's 60 s timeout, plus up to 20 s for a call already started);
+  - event names are unique across the whole club (database key), so the bot is told to include the
+    tournament name;
+  - seven grouping strategies (RANDOM too), not six;
+  - website regrouping with an empty roster no longer deletes the old tees first.
+  - The full list is in the final message to the owner.
+- **Final review** (fresh reviewer): 1 Critical, 3 Important, plus 1 Minor re-graded to Important.
+  All five fixed, each with a test that failed first:
+  - an admin stopped part-way (limit, deadline or outage) is told what was done, never "try again later";
+  - duplicate events and rewards are refused;
+  - shorter MCP write timeouts;
+  - the website's empty-roster regroup answers 400 again.
+  Deferred minors: a null score breaks the "has scores" check (fails safe); `/api/admin` logs ids,
+  not who made the change; two identical creates sent at the same moment.
+- **Not yet:** deploy, the owner's TEST Cup walkthrough.

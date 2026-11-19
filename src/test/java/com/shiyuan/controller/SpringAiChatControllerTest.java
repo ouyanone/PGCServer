@@ -82,14 +82,14 @@ class SpringAiChatControllerTest {
     }
 
     private void answers(String text, long in, long out, String cost) {
-        when(assistant.answer(anyString(), any(), any(), anyString(), any(), any())).thenAnswer(inv -> {
+        when(assistant.answer(anyString(), any(), any(), anyString(), any(), any(), any())).thenAnswer(inv -> {
             ((ChatUsage) inv.getArgument(4)).add(in, out, new BigDecimal(cost));
             return text;
         });
     }
 
     private void verifyNoAnswer() {
-        verify(assistant, never()).answer(anyString(), any(), any(), anyString(), any(), any());
+        verify(assistant, never()).answer(anyString(), any(), any(), anyString(), any(), any(), any());
     }
 
     @Test
@@ -147,7 +147,7 @@ class SpringAiChatControllerTest {
                 .andExpect(jsonPath("$.answer").value("You're #7."));
         verify(limits).tryConsume("sub-A");
         verify(assistant).answer(eq("Where am I?"), eq(Optional.of(new PlayerRef(42, "Jane Lee"))), eq(List.of()),
-                eq("member-token"), any(), any());
+                eq("member-token"), any(), any(), eq(com.shiyuan.chat.ChatRole.MEMBER));
         verify(history).save("sub-A", "Where am I?", "You're #7.");
         verify(budget).record(new BigDecimal("0.0034"), 1200L, 100L);
         verify(limits, never()).refund(anyString());
@@ -157,7 +157,7 @@ class SpringAiChatControllerTest {
 
     @Test
     void modelUnavailable_refunds() throws Exception {
-        when(assistant.answer(anyString(), any(), any(), anyString(), any(), any())).thenAnswer(inv -> {
+        when(assistant.answer(anyString(), any(), any(), anyString(), any(), any(), any())).thenAnswer(inv -> {
             ((ChatUsage) inv.getArgument(4)).add(500, 50, new BigDecimal("0.0015"));
             throw new ModelUnavailableException("model call failed: TransientAiException");
         });
@@ -171,7 +171,7 @@ class SpringAiChatControllerTest {
 
     @Test
     void mcpUnauthorized_401_refunds(CapturedOutput log) throws Exception {
-        when(assistant.answer(anyString(), any(), any(), anyString(), any(), any()))
+        when(assistant.answer(anyString(), any(), any(), anyString(), any(), any(), any()))
                 .thenThrow(new McpUnauthorizedException("mcp tools/call: HTTP 401"));
         mvc.perform(post(URL).with(member("sub-A")).contentType(MediaType.APPLICATION_JSON).content(ask("hi")))
                 .andExpect(status().isUnauthorized())
@@ -188,5 +188,22 @@ class SpringAiChatControllerTest {
                 .andExpect(jsonPath("$.refusal").value("signin"));
         verify(limits).refund("sub-A");
         verifyNoAnswer();
+    }
+
+    @Test
+    void adminProfile_passesAdminRole() throws Exception {
+        answers("Done.", 10, 5, "0.0001");
+        mvc.perform(post(URL).with(oidcLogin().idToken(t -> t.subject("sub-A").claim("profile", "admin")))
+                        .contentType(MediaType.APPLICATION_JSON).content(ask("Create a tournament")))
+                .andExpect(status().isOk());
+        verify(assistant).answer(anyString(), any(), any(), anyString(), any(), any(), eq(com.shiyuan.chat.ChatRole.ADMIN));
+    }
+
+    @Test
+    void noProfile_passesMemberRole() throws Exception {
+        answers("Hi.", 10, 5, "0.0001");
+        mvc.perform(post(URL).with(member("sub-A")).contentType(MediaType.APPLICATION_JSON).content(ask("Hi")))
+                .andExpect(status().isOk());
+        verify(assistant).answer(anyString(), any(), any(), anyString(), any(), any(), eq(com.shiyuan.chat.ChatRole.MEMBER));
     }
 }
