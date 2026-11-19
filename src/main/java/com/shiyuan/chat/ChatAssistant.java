@@ -21,13 +21,17 @@ public class ChatAssistant {
 
     public static final String TOO_MANY_LOOKUPS = "I couldn't finish looking that up — please try a narrower question.";
     public static final String CANNOT_HELP = "Sorry, I can't help with that one.";
+    /** An admin's question stopped by a limit: some changes may already have been made. */
+    public static final String ADMIN_STOPPED =
+            "I stopped before finishing, so the setup may be partly done. Check the admin pages, then tell me what's left.";
+    static final String NOT_OFFERED = "That tool is not available to you.";
 
     private final ModelGateway model;
     private final ChatPricing pricing;
     private final String modelId;
-    private final int maxToolCalls;
+    private final QuestionLimits memberLimits;
+    private final QuestionLimits adminLimits;
     private final Clock clock;
-    private final Duration deadline;
 
     public ChatAssistant(ModelGateway model, ChatPricing pricing, String modelId, int maxToolCalls) {
         this(model, pricing, modelId, maxToolCalls, Clock.systemUTC(), Duration.ofSeconds(35));
@@ -35,12 +39,24 @@ public class ChatAssistant {
 
     public ChatAssistant(ModelGateway model, ChatPricing pricing, String modelId, int maxToolCalls,
                          Clock clock, Duration deadline) {
+        this(model, pricing, modelId, new QuestionLimits(maxToolCalls, deadline),
+                new QuestionLimits(maxToolCalls, deadline), clock);
+    }
+
+    public ChatAssistant(ModelGateway model, ChatPricing pricing, String modelId,
+                         QuestionLimits memberLimits, QuestionLimits adminLimits, Clock clock) {
         this.model = model;
         this.pricing = pricing;
         this.modelId = modelId;
-        this.maxToolCalls = maxToolCalls;
+        this.memberLimits = memberLimits;
+        this.adminLimits = adminLimits;
         this.clock = clock;
-        this.deadline = deadline;
+    }
+
+    /** As a {@link ChatRole#MEMBER}. */
+    public String answer(String question, Optional<PlayerRef> me, List<ChatExchangeDto> history,
+                         McpSession mcp, ChatUsage usage, LocalDate today) {
+        return answer(question, me, history, mcp, usage, today, ChatRole.MEMBER);
     }
 
     /**
@@ -50,13 +66,16 @@ public class ChatAssistant {
      * @throws McpUnavailableException   the MCP server failed
      */
     public String answer(String question, Optional<PlayerRef> me, List<ChatExchangeDto> history,
-                         McpSession mcp, ChatUsage usage, LocalDate today) {
+                         McpSession mcp, ChatUsage usage, LocalDate today, ChatRole role) {
+        QuestionLimits limits = role == ChatRole.ADMIN ? adminLimits : memberLimits;
+        // A member's model never hears of the admin_ tools.
+        List<McpToolDef> offered = mcp.tools().stream().filter(t -> role.mayUse(t.name())).toList();
         ModelGateway.Conversation conversation =
-                model.start(ChatPrompt.system(me, today), mcp.tools(), history, question);
-        Instant giveUpAt = clock.instant().plus(deadline);
+                model.start(ChatPrompt.system(me, today, role), offered, history, question);
+        Instant giveUpAt = clock.instant().plus(limits.deadline());
         int toolCalls = 0;
         while (true) {
-            checkDeadline(giveUpAt);
+            checkDeadline(giveUpAt, limits);
             ModelGateway.Reply reply;
             try {
                 reply = conversation.send();
@@ -77,13 +96,18 @@ public class ChatAssistant {
             }
             // A reply cut off by max_tokens may carry a half-written tool call: never run it.
             if ("max_tokens".equals(reply.stopReason())
-                    || toolCalls + reply.toolCalls().size() > maxToolCalls) {
-                return TOO_MANY_LOOKUPS;
+                    || toolCalls + reply.toolCalls().size() > limits.maxToolCalls()) {
+                return role == ChatRole.ADMIN ? ADMIN_STOPPED : TOO_MANY_LOOKUPS;
             }
 
             List<ModelGateway.ToolResult> results = new ArrayList<>();
             for (ModelGateway.ToolCall call : reply.toolCalls()) {
-                checkDeadline(giveUpAt);
+                checkDeadline(giveUpAt, limits);
+                if (!role.mayUse(call.name())) {
+                    // Not offered, so never forwarded -- even if the model names it anyway.
+                    results.add(new ModelGateway.ToolResult(call.id(), NOT_OFFERED, true));
+                    continue;
+                }
                 ToolOutcome out = mcp.call(call.name(), call.arguments());
                 results.add(new ModelGateway.ToolResult(call.id(), out.text(), out.isError()));
             }
@@ -92,9 +116,9 @@ public class ChatAssistant {
         }
     }
 
-    private void checkDeadline(Instant giveUpAt) {
+    private void checkDeadline(Instant giveUpAt, QuestionLimits limits) {
         if (!clock.instant().isBefore(giveUpAt)) {
-            throw new ModelUnavailableException("question deadline of " + deadline.toSeconds() + " s passed");
+            throw new ModelUnavailableException("question deadline of " + limits.deadline().toSeconds() + " s passed");
         }
     }
 }

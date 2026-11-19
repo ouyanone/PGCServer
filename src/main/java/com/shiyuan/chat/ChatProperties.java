@@ -15,6 +15,10 @@ public class ChatProperties {
     private String model = "claude-sonnet-5-5";
     private long maxTokens = 2048;
     private int maxToolCalls = 5;
+    /** Club admins set up tournaments in one message, which takes many more tool calls. */
+    private int adminMaxToolCalls = 15;
+    /** Under nginx's 60 s proxy_read_timeout for the website. */
+    private int adminDeadlineSeconds = 55;
     /** Read from /etc/pgc/chatbot.properties in production; never in git. */
     private String anthropicApiKey = "";
     /** Empty means the SDK's default (api.anthropic.com). */
@@ -27,6 +31,10 @@ public class ChatProperties {
     public void setMaxTokens(long maxTokens) { this.maxTokens = maxTokens; }
     public int getMaxToolCalls() { return maxToolCalls; }
     public void setMaxToolCalls(int maxToolCalls) { this.maxToolCalls = maxToolCalls; }
+    public int getAdminMaxToolCalls() { return adminMaxToolCalls; }
+    public void setAdminMaxToolCalls(int adminMaxToolCalls) { this.adminMaxToolCalls = adminMaxToolCalls; }
+    public int getAdminDeadlineSeconds() { return adminDeadlineSeconds; }
+    public void setAdminDeadlineSeconds(int adminDeadlineSeconds) { this.adminDeadlineSeconds = adminDeadlineSeconds; }
     public String getAnthropicApiKey() { return anthropicApiKey; }
     public void setAnthropicApiKey(String anthropicApiKey) { this.anthropicApiKey = anthropicApiKey; }
     public String getAnthropicBaseUrl() { return anthropicBaseUrl; }
