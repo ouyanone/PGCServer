@@ -2,6 +2,8 @@ package com.shiyuan.controller;
 
 import com.shiyuan.dao.entity.db.*;
 import com.shiyuan.dao.repository.*;
+import com.shiyuan.service.AdminRequestException;
+import com.shiyuan.service.GamePlanService;
 import com.shiyuan.service.GroupingService;
 import com.shiyuan.service.GroupingService.Strategy;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +27,7 @@ public class GamePlanController extends BaseController {
     @Autowired private TeeRepository teeRepository;
     @Autowired private PlayerScoreRepository playerScoreRepository;
     @Autowired private GroupingService groupingService;
+    @Autowired private GamePlanService gamePlanService;
 
     // ── Roster ───────────────────────────────────────────────────────────────
 
@@ -41,19 +44,7 @@ public class GamePlanController extends BaseController {
                                            @RequestBody List<Long> playerIds,
                                            @AuthenticationPrincipal OidcUser principal) throws Exception {
         checkPrincipal(principal);
-        Event event = eventRepository.findById(eventId)
-                .orElseThrow(() -> new RuntimeException("Event not found: " + eventId));
-
-        for (Long playerId : playerIds) {
-            if (!eventPlayerRepository.existsByEventIdAndPlayerId(eventId, playerId)) {
-                Player player = playerRepository.findById(playerId)
-                        .orElseThrow(() -> new RuntimeException("Player not found: " + playerId));
-                EventPlayer ep = new EventPlayer();
-                ep.setEvent(event);
-                ep.setPlayer(player);
-                eventPlayerRepository.save(ep);
-            }
-        }
+        gamePlanService.addPlayers(eventId, playerIds);
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
@@ -75,71 +66,16 @@ public class GamePlanController extends BaseController {
             @PathVariable Long eventId,
             @RequestBody Map<String, String> body,
             @AuthenticationPrincipal OidcUser principal) throws Exception {
-
         checkPrincipal(principal);
-
-        Event event = eventRepository.findById(eventId)
-                .orElseThrow(() -> new RuntimeException("Event not found: " + eventId));
-
-        // Bulk-delete player_scores then tees (bypasses JPA lifecycle / orphanRemoval conflicts)
-        playerScoreRepository.deleteByEventId(eventId);
-        teeRepository.deleteByEventId(eventId);
-
-        // Load roster
-        List<Player> players = eventPlayerRepository.findByEventId(eventId)
-                .stream().map(EventPlayer::getPlayer).collect(Collectors.toList());
-
-        if (players.isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
-
         Strategy strategy = Strategy.valueOf(body.getOrDefault("strategy", "GHIN_BEST_TO_WORST"));
-        List<List<Player>> groups = groupingService.generateGroups(players, strategy);
-
-        // Persist tees and player scores
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (int i = 0; i < groups.size(); i++) {
-            Tee tee = new Tee();
-            tee.setTeeName("Tee " + (i + 1));
-            tee.setTeeDesc("");
-            tee.setTeeStroy("");
-            tee.setEvent(event);
-            tee = teeRepository.save(tee);
-
-            List<Map<String, Object>> groupPlayers = new ArrayList<>();
-            for (Player player : groups.get(i)) {
-                PlayerScore ps = new PlayerScore();
-                ps.setPlayer(player);
-                ps.setTee(tee);
-                ps.setRecordStory("");
-                ps.setScore(0);
-                ps.setGamePoint(0);
-                ps.setFlight(0);
-                ps.setEntryScore(0.0);
-                ps.setNetScore(0.0);
-                ps.setEntryPGCHandicap(0.0);
-                ps.setCurrentRoundHandicap(0.0);
-                ps = playerScoreRepository.save(ps);
-
-                Map<String, Object> pm = new LinkedHashMap<>();
-                pm.put("playerScoreId", ps.getId());
-                pm.put("playerId", player.getId());
-                pm.put("playerName", player.getfName() + " " + player.getlName());
-                pm.put("handicap", player.getHandicap());
-                pm.put("pgcHandicap", player.getPgcHandicap());
-                pm.put("gender", player.getGender());
-                groupPlayers.add(pm);
+        try {
+            return ResponseEntity.ok(gamePlanService.generateGroups(eventId, strategy, false));
+        } catch (AdminRequestException e) {
+            if (e.status() == 400) {
+                return ResponseEntity.badRequest().build(); // empty roster, as before
             }
-
-            Map<String, Object> groupMap = new LinkedHashMap<>();
-            groupMap.put("teeId", tee.getId());
-            groupMap.put("teeName", tee.getTeeName());
-            groupMap.put("teeTime", tee.getTeeTime());
-            groupMap.put("players", groupPlayers);
-            result.add(groupMap);
+            throw e;
         }
-
-        return ResponseEntity.ok(result);
     }
 
     // ── Clear all groups ─────────────────────────────────────────────────────
@@ -205,11 +141,7 @@ public class GamePlanController extends BaseController {
                                           @RequestBody Map<String, String> body,
                                           @AuthenticationPrincipal OidcUser principal) throws Exception {
         checkPrincipal(principal);
-        Tee tee = teeRepository.findById(teeId)
-                .orElseThrow(() -> new RuntimeException("Tee not found: " + teeId));
-        if (body.containsKey("teeName")) tee.setTeeName(body.get("teeName"));
-        if (body.containsKey("teeTime")) tee.setTeeTime(body.get("teeTime"));
-        teeRepository.save(tee);
+        gamePlanService.updateTee(teeId, body.get("teeTime"), body.get("teeName"));
         return ResponseEntity.ok().build();
     }
 
@@ -270,37 +202,7 @@ public class GamePlanController extends BaseController {
                                              @PathVariable Long playerId,
                                              @AuthenticationPrincipal OidcUser principal) throws Exception {
         checkPrincipal(principal);
-        Event event = eventRepository.findById(eventId)
-                .orElseThrow(() -> new RuntimeException("Event not found: " + eventId));
-        Player player = playerRepository.findById(playerId)
-                .orElseThrow(() -> new RuntimeException("Player not found: " + playerId));
-
-        List<Tee> tees = teeRepository.findByEventIdOrderByTeeName(eventId);
-        Tee targetTee = tees.stream()
-                .filter(t -> t.getPlayerScoreList().size() < 4)
-                .findFirst().orElse(null);
-
-        if (targetTee == null) {
-            targetTee = new Tee();
-            targetTee.setTeeName("Tee " + (tees.size() + 1));
-            targetTee.setTeeDesc("");
-            targetTee.setTeeStroy("");
-            targetTee.setEvent(event);
-            targetTee = teeRepository.save(targetTee);
-        }
-
-        PlayerScore ps = new PlayerScore();
-        ps.setPlayer(player);
-        ps.setTee(targetTee);
-        ps.setRecordStory("");
-        ps.setScore(0);
-        ps.setGamePoint(0);
-        ps.setFlight(0);
-        ps.setEntryScore(0.0);
-        ps.setNetScore(0.0);
-        ps.setEntryPGCHandicap(0.0);
-        ps.setCurrentRoundHandicap(0.0);
-        playerScoreRepository.save(ps);
+        gamePlanService.assignPlayer(eventId, playerId, false);
         return ResponseEntity.ok().build();
     }
 }
