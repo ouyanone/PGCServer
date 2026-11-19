@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -25,10 +26,13 @@ import com.shiyuan.controller.api.AdminApiDtos.CreateTournament;
 import com.shiyuan.controller.api.AdminApiDtos.ErrorBody;
 import com.shiyuan.controller.api.AdminApiDtos.EventView;
 import com.shiyuan.controller.api.AdminApiDtos.GenerateGroups;
+import com.shiyuan.controller.api.AdminApiDtos.PlayerFields;
+import com.shiyuan.controller.api.AdminApiDtos.PlayerView;
 import com.shiyuan.controller.api.AdminApiDtos.SetTee;
 import com.shiyuan.controller.api.AdminApiDtos.RewardView;
 import com.shiyuan.controller.api.AdminApiDtos.TournamentView;
 import com.shiyuan.dao.entity.db.Event;
+import com.shiyuan.dao.entity.db.Player;
 import com.shiyuan.dao.entity.db.Reward;
 import com.shiyuan.dao.entity.db.Tournament;
 import com.shiyuan.service.AdminRequestException;
@@ -36,6 +40,7 @@ import com.shiyuan.service.GamePlanService;
 import com.shiyuan.service.GamePlanService.AddPlayersResult;
 import com.shiyuan.service.GamePlanService.TeeRef;
 import com.shiyuan.service.GroupingService.Strategy;
+import com.shiyuan.service.PlayerService;
 import com.shiyuan.service.TournamentAdminService;
 
 /**
@@ -49,10 +54,33 @@ public class AdminApiController {
 
     private final TournamentAdminService tournaments;
     private final GamePlanService gamePlan;
+    private final PlayerService players;
 
-    public AdminApiController(TournamentAdminService tournaments, GamePlanService gamePlan) {
+    public AdminApiController(TournamentAdminService tournaments, GamePlanService gamePlan, PlayerService players) {
         this.tournaments = tournaments;
         this.gamePlan = gamePlan;
+        this.players = players;
+    }
+
+    @PostMapping(path = "/api/admin/players", consumes = MediaType.APPLICATION_JSON_VALUE,
+                 produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<PlayerView> addPlayer(@RequestBody PlayerFields req) {
+        Player p = players.addPlayer(req);
+        log.info("api admin add player id={}", p.getId());
+        return ResponseEntity.status(HttpStatus.CREATED).body(view(p));
+    }
+
+    @PatchMapping(path = "/api/admin/players/{playerId}", consumes = MediaType.APPLICATION_JSON_VALUE,
+                  produces = MediaType.APPLICATION_JSON_VALUE)
+    public PlayerView updatePlayer(@PathVariable long playerId, @RequestBody PlayerFields req) {
+        Player p = players.updatePlayer(playerId, req);
+        log.info("api admin update player id={}", playerId);
+        return view(p);
+    }
+
+    private static PlayerView view(Player p) {
+        return new PlayerView(p.getId(), p.getfName(), p.getlName(), p.getNickName(), p.getChineseNickName(),
+                p.getGhinNumber(), p.getGender(), p.getHandicap(), Boolean.TRUE.equals(p.getIsActive()));
     }
 
     @PostMapping(path = "/api/admin/tournaments", consumes = MediaType.APPLICATION_JSON_VALUE,

@@ -34,5 +34,17 @@ public final class AdminApiDtos {
 
     public record SetTee(String teeTime, String teeName) {}
 
+    /**
+     * The only player fields {@code /api/admin} can write. No phone or email: contact details must
+     * not travel through chat history or the model provider. PGC handicap, points and score
+     * averages stay computed by the app.
+     */
+    public record PlayerFields(String firstName, String lastName, String nickName, String chineseNickName,
+                               String ghinNumber, String gender, Double handicap, Boolean active) {}
+
+    /** What {@code /api/admin} says about a player -- never phone or email. */
+    public record PlayerView(long id, String firstName, String lastName, String nickName, String chineseNickName,
+                             String ghinNumber, String gender, double handicap, boolean active) {}
+
     public record ErrorBody(String error) {}
 }

@@ -19,6 +19,12 @@ public interface PlayerService {
 
     Player savePlayer(Player player);
 
+    /** {@code /api/admin}: a new player from the writable fields; refuses duplicates (409). */
+    Player addPlayer(com.shiyuan.controller.api.AdminApiDtos.PlayerFields fields);
+
+    /** {@code /api/admin}: changes only the non-null fields; everything else is left as it is. */
+    Player updatePlayer(long id, com.shiyuan.controller.api.AdminApiDtos.PlayerFields fields);
+
     Player getPlayerById(String id);
 
     void updateLast3Score();
