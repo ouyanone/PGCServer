@@ -73,6 +73,21 @@ public class ChatAssistant {
         ModelGateway.Conversation conversation =
                 model.start(ChatPrompt.system(me, today, role), offered, history, question);
         Instant giveUpAt = clock.instant().plus(limits.deadline());
+        List<String> done = new ArrayList<>();
+        try {
+            return loop(conversation, mcp, usage, role, limits, giveUpAt, done);
+        } catch (ModelUnavailableException | McpUnavailableException e) {
+            // An admin stopped after changing something must not be told to "try again": resending
+            // the same setup would repeat what already happened. Say what was done instead.
+            if (role == ChatRole.ADMIN && !done.isEmpty()) {
+                return stopped(done);
+            }
+            throw e;
+        }
+    }
+
+    private String loop(ModelGateway.Conversation conversation, McpSession mcp, ChatUsage usage, ChatRole role,
+                        QuestionLimits limits, Instant giveUpAt, List<String> done) {
         int toolCalls = 0;
         while (true) {
             checkDeadline(giveUpAt, limits);
@@ -97,7 +112,7 @@ public class ChatAssistant {
             // A reply cut off by max_tokens may carry a half-written tool call: never run it.
             if ("max_tokens".equals(reply.stopReason())
                     || toolCalls + reply.toolCalls().size() > limits.maxToolCalls()) {
-                return role == ChatRole.ADMIN ? ADMIN_STOPPED : TOO_MANY_LOOKUPS;
+                return role == ChatRole.ADMIN ? stopped(done) : TOO_MANY_LOOKUPS;
             }
 
             List<ModelGateway.ToolResult> results = new ArrayList<>();
@@ -109,11 +124,39 @@ public class ChatAssistant {
                     continue;
                 }
                 ToolOutcome out = mcp.call(call.name(), call.arguments());
+                if (!out.isError() && call.name().startsWith(ChatRole.ADMIN_TOOL_PREFIX) && isChange(out.text())) {
+                    done.add(firstSentence(out.text()));
+                }
                 results.add(new ModelGateway.ToolResult(call.id(), out.text(), out.isError()));
             }
             toolCalls += reply.toolCalls().size();
             conversation.addToolResults(results);
         }
+    }
+
+    /** {@link #ADMIN_STOPPED}, followed by the first sentence of each change that went through. */
+    public static String stopped(List<String> done) {
+        return done.isEmpty() ? ADMIN_STOPPED : ADMIN_STOPPED + " Done so far: " + String.join(" ", done);
+    }
+
+    /**
+     * The MCP admin tools answer a refusal or failure as ordinary text that starts with one of these
+     * (AdminTools, WriteScopePolicy, ToolAccessGuard): such a result is not a change that was made.
+     */
+    private static final List<String> NOT_A_CHANGE = List.of("Not done", "Could not reach", "The club server",
+            "This tool", "Refusing", NOT_OFFERED);
+
+    public static boolean isChange(String text) {
+        String t = text == null ? "" : text.strip();
+        return !t.isEmpty() && NOT_A_CHANGE.stream().noneMatch(t::startsWith);
+    }
+
+    /** The admin tools start every result with one plain sentence; the JSON after it is for the model. */
+    public static String firstSentence(String text) {
+        String t = text == null ? "" : text.strip();
+        int end = t.indexOf(". ");
+        String sentence = end < 0 ? t : t.substring(0, end + 1);
+        return sentence.length() > 240 ? sentence.substring(0, 240) + "..." : sentence;
     }
 
     private void checkDeadline(Instant giveUpAt, QuestionLimits limits) {

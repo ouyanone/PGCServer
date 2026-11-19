@@ -2,7 +2,6 @@ package com.shiyuan.controller;
 
 import com.shiyuan.dao.entity.db.*;
 import com.shiyuan.dao.repository.*;
-import com.shiyuan.service.AdminRequestException;
 import com.shiyuan.service.GamePlanService;
 import com.shiyuan.service.GroupingService;
 import com.shiyuan.service.GroupingService.Strategy;
@@ -68,14 +67,12 @@ public class GamePlanController extends BaseController {
             @AuthenticationPrincipal OidcUser principal) throws Exception {
         checkPrincipal(principal);
         Strategy strategy = Strategy.valueOf(body.getOrDefault("strategy", "GHIN_BEST_TO_WORST"));
-        try {
-            return ResponseEntity.ok(gamePlanService.generateGroups(eventId, strategy, false));
-        } catch (AdminRequestException e) {
-            if (e.status() == 400) {
-                return ResponseEntity.badRequest().build(); // empty roster, as before
-            }
-            throw e;
+        // Checked here, not left to the service: a service exception inside this transaction would
+        // mark it rollback-only, and the 400 would turn into a 500 at commit.
+        if (eventPlayerRepository.findByEventId(eventId).isEmpty()) {
+            return ResponseEntity.badRequest().build();
         }
+        return ResponseEntity.ok(gamePlanService.generateGroups(eventId, strategy, false));
     }
 
     // ── Clear all groups ─────────────────────────────────────────────────────

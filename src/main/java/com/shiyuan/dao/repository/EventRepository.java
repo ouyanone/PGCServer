@@ -14,6 +14,9 @@ public interface EventRepository extends CrudRepository<Event, Long>{
 	
 	Event findById(long id);
 
+	/** Event names are unique across the club (unique key event.event_name). */
+	java.util.Optional<Event> findFirstByEventNameIgnoreCase(String eventName);
+
 	Iterable<Event> findAllByOrderByEventDateDesc();
 	
 	Event findFirstByStatusAndEventDateGreaterThanEqualOrderByEventDate(String status, LocalDate today);

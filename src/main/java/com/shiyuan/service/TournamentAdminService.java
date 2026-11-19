@@ -90,6 +90,11 @@ public class TournamentAdminService {
             throw AdminRequestException.badRequest("The event date " + date + " is outside the tournament's dates, "
                     + t.getStartDate() + " to " + t.getEndDate() + ".");
         }
+        events.findFirstByEventNameIgnoreCase(name).ifPresent(existing -> {
+            throw AdminRequestException.conflict("Event " + existing.getId() + " is already called \""
+                    + existing.getEventName() + "\"; event names must be unique across the club (include the "
+                    + "tournament name, e.g. \"" + t.getName() + " Round 1\"). Nothing was created.");
+        });
         Long courseId = required(req.courseId(), "courseId");
         Course course = courses.findById(courseId)
                 .orElseThrow(() -> AdminRequestException.notFound("Course " + courseId + " does not exist."));
@@ -112,6 +117,15 @@ public class TournamentAdminService {
                 .orElseThrow(() -> AdminRequestException.notFound("Event " + eventId + " does not exist."));
         Player player = players.findById(playerId)
                 .orElseThrow(() -> AdminRequestException.notFound("Player " + playerId + " does not exist."));
+        rewards.findRewardForEvent(eventId).stream()
+                .filter(x -> x.getPlayer() != null && playerId.equals(x.getPlayer().getId())
+                        && x.getRewardName() != null && x.getRewardName().trim().equalsIgnoreCase(name))
+                .findFirst()
+                .ifPresent(x -> {
+                    throw AdminRequestException.conflict("Reward " + x.getId() + " \"" + x.getRewardName()
+                            + "\" already exists for player " + playerId + " in event " + eventId
+                            + "; nothing was created.");
+                });
         Reward r = new Reward();
         r.setRewardName(name);
         r.setRewardDesc(req.rewardDesc() == null ? "" : req.rewardDesc().trim());

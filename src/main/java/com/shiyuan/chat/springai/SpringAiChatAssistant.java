@@ -12,6 +12,7 @@ import java.util.function.Supplier;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -105,6 +106,23 @@ public class SpringAiChatAssistant {
                     .build();
 
             Prompt prompt = new Prompt(messages(question, me, history, today, role), options);
+            List<String> done = new ArrayList<>();
+            try {
+                return loop(model, prompt, options, tools, session, usage, role, limits, giveUpAt, done);
+            } catch (ModelUnavailableException | McpUnavailableException e) {
+                // As in ChatAssistant: an admin stopped after changing something is told what was
+                // done, never "try again" -- resending would repeat it.
+                if (role == ChatRole.ADMIN && !done.isEmpty()) {
+                    return ChatAssistant.stopped(done);
+                }
+                throw e;
+            }
+        }
+    }
+
+    private String loop(ChatModel model, Prompt prompt, ToolCallingChatOptions options, ToolCallingManager tools,
+                        McpToolsSession session, ChatUsage usage, ChatRole role, QuestionLimits limits,
+                        Instant giveUpAt, List<String> done) {
             int toolCalls = 0;
             while (true) {
                 checkDeadline(giveUpAt, limits);
@@ -122,7 +140,7 @@ public class SpringAiChatAssistant {
                 int requested = toolCallCount(response);
                 // A reply cut off by max_tokens may carry a half-written tool call: never run it.
                 if ("max_tokens".equalsIgnoreCase(finish) || toolCalls + requested > limits.maxToolCalls()) {
-                    return role == ChatRole.ADMIN ? ChatAssistant.ADMIN_STOPPED : ChatAssistant.TOO_MANY_LOOKUPS;
+                    return role == ChatRole.ADMIN ? ChatAssistant.stopped(done) : ChatAssistant.TOO_MANY_LOOKUPS;
                 }
 
                 checkDeadline(giveUpAt, limits);
@@ -135,10 +153,49 @@ public class SpringAiChatAssistant {
                     throw session.translate(e);
                 }
                 toolCalls += requested;
+                recordChanges(result, done);
                 prompt = new Prompt(result.conversationHistory(), options);
+            }
+    }
+
+    /** Notes the first sentence of each admin_ tool result that made a change. */
+    private static void recordChanges(ToolExecutionResult result, List<String> done) {
+        List<Message> history = result.conversationHistory();
+        if (history.isEmpty() || !(history.get(history.size() - 1) instanceof ToolResponseMessage responses)) {
+            return;
+        }
+        for (ToolResponseMessage.ToolResponse r : responses.getResponses()) {
+            String text = plainText(r.responseData());
+            if (r.name().startsWith(ChatRole.ADMIN_TOOL_PREFIX) && ChatAssistant.isChange(text)) {
+                done.add(ChatAssistant.firstSentence(text));
             }
         }
     }
+
+    /** Spring AI's MCP callback returns the tool's content list as JSON; take its text back out. */
+    static String plainText(String responseData) {
+        if (responseData == null) {
+            return "";
+        }
+        String data = responseData.strip();
+        if (!data.startsWith("[") && !data.startsWith("{")) {
+            return data;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = JSON.readTree(data);
+            StringBuilder text = new StringBuilder();
+            for (com.fasterxml.jackson.databind.JsonNode item : node.isArray() ? node : List.of(node)) {
+                if (item.path("text").isTextual()) {
+                    text.append(item.path("text").asText());
+                }
+            }
+            return text.length() > 0 ? text.toString() : data;
+        } catch (Exception notJson) {
+            return data;
+        }
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private static List<Message> messages(String question, Optional<PlayerRef> me,
                                           List<ChatExchangeDto> history, LocalDate today, ChatRole role) {

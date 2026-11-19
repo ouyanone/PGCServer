@@ -100,6 +100,47 @@ class SpringAiChatAssistantAdminTest {
     void adminLimitAfterWrites_saysPartlyDone() {
         claude.reply(toolUse("toolu_1", "admin_create_tournament", "{\"name\":\"X\"}", "", 100, 10),
                 toolUse("toolu_2", "admin_create_tournament", "{\"name\":\"Y\"}", "", 100, 10));
+        assertThat(ask(assistant(5, 1), ChatRole.ADMIN))
+                .startsWith(ChatAssistant.ADMIN_STOPPED)
+                .contains("Created tournament TEST Cup (tournamentId 12), 2026-12-12 to 2026-12-13.");
+    }
+
+    private SpringAiChatAssistant assistantWithClock(Clock clock) {
+        return new SpringAiChatAssistant(new SpringAiModels("test-key", claude.url(), "claude-sonnet-5-5", 2048),
+                PRICING, "claude-sonnet-5-5", new QuestionLimits(5, Duration.ofSeconds(35)),
+                new QuestionLimits(15, Duration.ofSeconds(35)), mcp.url(), clock);
+    }
+
+    @Test
+    void adminDeadlineAfterWrites_saysPartlyDone() {
+        java.time.Instant t0 = java.time.Instant.parse("2026-11-18T12:00:00Z");
+        java.util.Deque<java.time.Instant> times = new java.util.ArrayDeque<>(java.util.List.of(
+                t0, t0, t0, t0, t0.plusSeconds(60)));
+        Clock clock = new Clock() {
+            @Override public java.time.ZoneId getZone() { return java.time.ZoneId.of("UTC"); }
+            @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+            @Override public java.time.Instant instant() { return times.size() > 1 ? times.poll() : times.peek(); }
+        };
+        claude.reply(toolUse("toolu_1", "admin_create_tournament", "{\"name\":\"X\"}", "", 100, 10),
+                toolUse("toolu_2", "admin_create_tournament", "{\"name\":\"Y\"}", "", 100, 10));
+        assertThat(ask(assistantWithClock(clock), ChatRole.ADMIN))
+                .startsWith(ChatAssistant.ADMIN_STOPPED).contains("tournamentId 12");
+    }
+
+    @Test
+    void adminMcpOutageAfterWrites_saysPartlyDone() {
+        mcp.toolsCallFailFrom = 2;
+        claude.reply(toolUse("toolu_1", "admin_create_tournament", "{\"name\":\"X\"}", "", 100, 10),
+                toolUse("toolu_2", "admin_create_tournament", "{\"name\":\"Y\"}", "", 100, 10));
+        assertThat(ask(assistant(5, 15), ChatRole.ADMIN))
+                .startsWith(ChatAssistant.ADMIN_STOPPED).contains("tournamentId 12");
+    }
+
+    @Test
+    void refusedWrite_notListedAsDone() {
+        mcp.adminCallText = "Not done: Event 812 is already called \"X\". More.";
+        claude.reply(toolUse("toolu_1", "admin_create_event", "{}", "", 100, 10),
+                toolUse("toolu_2", "admin_create_event", "{}", "", 100, 10));
         assertThat(ask(assistant(5, 1), ChatRole.ADMIN)).isEqualTo(ChatAssistant.ADMIN_STOPPED);
     }
 

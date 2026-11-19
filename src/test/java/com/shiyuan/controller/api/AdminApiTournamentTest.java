@@ -119,7 +119,7 @@ class AdminApiTournamentTest {
     void createEvent_201_inheritsSeason() throws Exception {
         Tournament t = data.tournament(LocalDate.of(2026, 12, 12), LocalDate.of(2026, 12, 13));
         data.flushAndClear();
-        mvc.perform(json(post("/api/admin/tournaments/" + t.getId() + "/events"), eventBody("Round 1", "2026-12-12", course.getId())))
+        mvc.perform(json(post("/api/admin/tournaments/" + t.getId() + "/events"), eventBody("TEST R1 " + tag(), "2026-12-12", course.getId())))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.tournamentId").value(t.getId()))
@@ -135,7 +135,7 @@ class AdminApiTournamentTest {
     void createEvent_dateOutsideTournament_400() throws Exception {
         Tournament t = data.tournament(LocalDate.of(2026, 12, 12), LocalDate.of(2026, 12, 13));
         data.flushAndClear();
-        mvc.perform(json(post("/api/admin/tournaments/" + t.getId() + "/events"), eventBody("Round 3", "2026-12-20", course.getId())))
+        mvc.perform(json(post("/api/admin/tournaments/" + t.getId() + "/events"), eventBody("TEST R3 " + tag(), "2026-12-20", course.getId())))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value(containsString("2026-12-12")));
     }
@@ -144,7 +144,7 @@ class AdminApiTournamentTest {
     void createEvent_unknownCourse_404() throws Exception {
         Tournament t = data.tournament(LocalDate.of(2026, 12, 12), LocalDate.of(2026, 12, 13));
         data.flushAndClear();
-        mvc.perform(json(post("/api/admin/tournaments/" + t.getId() + "/events"), eventBody("Round 1", "2026-12-12", -1)))
+        mvc.perform(json(post("/api/admin/tournaments/" + t.getId() + "/events"), eventBody("TEST R1 " + tag(), "2026-12-12", -1)))
                 .andExpect(status().isNotFound());
     }
 
@@ -185,5 +185,38 @@ class AdminApiTournamentTest {
         mvc.perform(post("/api/admin/tournaments").contentType(MediaType.APPLICATION_JSON)
                         .content(tournamentBody("TEST Cup D", "2026-12-12", "2026-12-13")))
                 .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * Final review #1: an admin resending a setup must not get a second event. Event names are
+     * unique across the whole club (event.event_name), so the check is club-wide, not per tournament.
+     */
+    @Test
+    void createEvent_duplicateName_409() throws Exception {
+        Tournament t = data.tournament(LocalDate.of(2026, 12, 12), LocalDate.of(2026, 12, 13));
+        Tournament other = data.tournament(LocalDate.of(2026, 12, 12), LocalDate.of(2026, 12, 13));
+        data.flushAndClear();
+        String name = "TEST R1 " + tag();
+        String first = mvc.perform(json(post("/api/admin/tournaments/" + t.getId() + "/events"), eventBody(name, "2026-12-12", course.getId())))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String id = first.replaceAll(".*\"id\":(\\d+).*", "$1");
+        mvc.perform(json(post("/api/admin/tournaments/" + other.getId() + "/events"), eventBody(name.toLowerCase(), "2026-12-13", course.getId())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value(containsString(id)));
+    }
+
+    @Test
+    void createReward_duplicate_409() throws Exception {
+        Event e = data.event(LocalDate.of(2026, 12, 12));
+        Player p = data.players(1).get(0);
+        data.flushAndClear();
+        String body = "{\"eventId\":%d,\"playerId\":%d,\"rewardName\":\"Closest to the pin\"}".formatted(e.getId(), p.getId());
+        mvc.perform(json(post("/api/admin/rewards"), body)).andExpect(status().isCreated());
+        mvc.perform(json(post("/api/admin/rewards"), body.replace("Closest", "closest")))
+                .andExpect(status().isConflict());
+    }
+
+    private static String tag() {
+        return java.util.UUID.randomUUID().toString().substring(0, 8);
     }
 }
