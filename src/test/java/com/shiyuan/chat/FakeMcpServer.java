@@ -30,6 +30,8 @@ public final class FakeMcpServer implements AutoCloseable {
     public volatile boolean toolsCallIsError = false;
     /** When set, tools/call gets no HTTP reply at all: the connection is dropped. */
     public volatile boolean toolsCallDropsConnection = false;
+    /** When set, tools/list also offers an admin_ tool (as the real server does after this feature). */
+    public volatile boolean listsAdminTool = false;
     volatile boolean answerAsSse = false;
     private final HttpServer http;
 
@@ -66,7 +68,10 @@ public final class FakeMcpServer implements AutoCloseable {
                          "serverInfo":{"name":"fake","version":"0"}}""";
                 case "tools/list" -> """
                         {"tools":[{"name":"get_standings","description":"Club standings",
-                          "inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}}}}]}""";
+                          "inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}}}}%s]}"""
+                        .formatted(listsAdminTool ? """
+                        ,{"name":"admin_create_tournament","description":"Create a tournament",
+                          "inputSchema":{"type":"object","properties":{"name":{"type":"string"}}}}""" : "");
                 case "tools/call" -> toolsCallIsError || req.path("params").path("name").asText().equals("broken")
                         ? """
                           {"content":[{"type":"text","text":"Event 999 does not exist."}],"isError":true}"""

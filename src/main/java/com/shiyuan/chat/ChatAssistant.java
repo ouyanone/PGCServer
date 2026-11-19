@@ -24,7 +24,7 @@ public class ChatAssistant {
     /** An admin's question stopped by a limit: some changes may already have been made. */
     public static final String ADMIN_STOPPED =
             "I stopped before finishing, so the setup may be partly done. Check the admin pages, then tell me what's left.";
-    static final String NOT_OFFERED = "That tool is not available to you.";
+    public static final String NOT_OFFERED = "That tool is not available to you.";
 
     private final ModelGateway model;
     private final ChatPricing pricing;

@@ -20,6 +20,9 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.DefaultToolCallingManager;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.DefaultToolDefinition;
+import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 
@@ -27,6 +30,8 @@ import com.shiyuan.chat.ChatAssistant;
 import com.shiyuan.chat.ChatExchangeDto;
 import com.shiyuan.chat.ChatPricing;
 import com.shiyuan.chat.ChatPrompt;
+import com.shiyuan.chat.ChatRole;
+import com.shiyuan.chat.QuestionLimits;
 import com.shiyuan.chat.ChatUsage;
 import com.shiyuan.chat.McpUnauthorizedException;
 import com.shiyuan.chat.McpUnavailableException;
@@ -45,20 +50,32 @@ public class SpringAiChatAssistant {
     private final Supplier<ChatModel> models;
     private final ChatPricing pricing;
     private final String modelId;
-    private final int maxToolCalls;
+    private final QuestionLimits memberLimits;
+    private final QuestionLimits adminLimits;
     private final String mcpUrl;
     private final Clock clock;
-    private final Duration deadline;
 
     public SpringAiChatAssistant(Supplier<ChatModel> models, ChatPricing pricing, String modelId, int maxToolCalls,
                                  String mcpUrl, Clock clock, Duration deadline) {
+        this(models, pricing, modelId, new QuestionLimits(maxToolCalls, deadline),
+                new QuestionLimits(maxToolCalls, deadline), mcpUrl, clock);
+    }
+
+    public SpringAiChatAssistant(Supplier<ChatModel> models, ChatPricing pricing, String modelId,
+                                 QuestionLimits memberLimits, QuestionLimits adminLimits, String mcpUrl, Clock clock) {
         this.models = models;
         this.pricing = pricing;
         this.modelId = modelId;
-        this.maxToolCalls = maxToolCalls;
+        this.memberLimits = memberLimits;
+        this.adminLimits = adminLimits;
         this.mcpUrl = mcpUrl;
         this.clock = clock;
-        this.deadline = deadline;
+    }
+
+    /** As a {@link ChatRole#MEMBER}. */
+    public String answer(String question, Optional<PlayerRef> me, List<ChatExchangeDto> history,
+                         String accessToken, ChatUsage usage, LocalDate today) {
+        return answer(question, me, history, accessToken, usage, today, ChatRole.MEMBER);
     }
 
     /**
@@ -68,23 +85,29 @@ public class SpringAiChatAssistant {
      * @throws McpUnavailableException   the MCP server failed
      */
     public String answer(String question, Optional<PlayerRef> me, List<ChatExchangeDto> history,
-                         String accessToken, ChatUsage usage, LocalDate today) {
+                         String accessToken, ChatUsage usage, LocalDate today, ChatRole role) {
         ChatModel model = models.get(); // before touching MCP: no key, no work
-        Instant giveUpAt = clock.instant().plus(deadline);
+        QuestionLimits limits = role == ChatRole.ADMIN ? adminLimits : memberLimits;
+        Instant giveUpAt = clock.instant().plus(limits.deadline());
 
         try (McpToolsSession session = McpToolsSession.open(mcpUrl, accessToken)) {
             ToolCallingChatOptions options = ToolCallingChatOptions.builder()
-                    .toolCallbacks(session.toolCallbacks(() -> checkDeadline(giveUpAt)))
+                    // A member's model never hears of the admin_ tools.
+                    .toolCallbacks(session.toolCallbacks(() -> checkDeadline(giveUpAt, limits)).stream()
+                            .filter(cb -> role.mayUse(cb.getToolDefinition().name()))
+                            .toList())
                     .internalToolExecutionEnabled(false)
                     .build();
             ToolCallingManager tools = DefaultToolCallingManager.builder()
                     .toolExecutionExceptionProcessor(session.toolErrorProcessor())
+                    // A tool the model names but was not offered: answer "not available", never call it.
+                    .toolCallbackResolver(NotOffered::new)
                     .build();
 
-            Prompt prompt = new Prompt(messages(question, me, history, today), options);
+            Prompt prompt = new Prompt(messages(question, me, history, today, role), options);
             int toolCalls = 0;
             while (true) {
-                checkDeadline(giveUpAt);
+                checkDeadline(giveUpAt, limits);
                 ChatResponse response = call(model, prompt);
                 record(response, usage);
 
@@ -98,11 +121,11 @@ public class SpringAiChatAssistant {
                 }
                 int requested = toolCallCount(response);
                 // A reply cut off by max_tokens may carry a half-written tool call: never run it.
-                if ("max_tokens".equalsIgnoreCase(finish) || toolCalls + requested > maxToolCalls) {
-                    return ChatAssistant.TOO_MANY_LOOKUPS;
+                if ("max_tokens".equalsIgnoreCase(finish) || toolCalls + requested > limits.maxToolCalls()) {
+                    return role == ChatRole.ADMIN ? ChatAssistant.ADMIN_STOPPED : ChatAssistant.TOO_MANY_LOOKUPS;
                 }
 
-                checkDeadline(giveUpAt);
+                checkDeadline(giveUpAt, limits);
                 ToolExecutionResult result;
                 try {
                     result = tools.executeToolCalls(prompt, response);
@@ -118,9 +141,9 @@ public class SpringAiChatAssistant {
     }
 
     private static List<Message> messages(String question, Optional<PlayerRef> me,
-                                          List<ChatExchangeDto> history, LocalDate today) {
+                                          List<ChatExchangeDto> history, LocalDate today, ChatRole role) {
         List<Message> messages = new ArrayList<>();
-        messages.add(new SystemMessage(ChatPrompt.system(me, today)));
+        messages.add(new SystemMessage(ChatPrompt.system(me, today, role)));
         for (ChatExchangeDto past : history) {
             messages.add(new UserMessage(past.question()));
             messages.add(new AssistantMessage(past.answer()));
@@ -179,9 +202,22 @@ public class SpringAiChatAssistant {
         return "";
     }
 
-    private void checkDeadline(Instant giveUpAt) {
+    private void checkDeadline(Instant giveUpAt, QuestionLimits limits) {
         if (!clock.instant().isBefore(giveUpAt)) {
-            throw new ModelUnavailableException("question deadline of " + deadline.toSeconds() + " s passed");
+            throw new ModelUnavailableException("question deadline of " + limits.deadline().toSeconds() + " s passed");
+        }
+    }
+
+    /** Stands in for a tool the model named without being offered it; never reaches MCP. */
+    private record NotOffered(String name) implements ToolCallback {
+        @Override
+        public ToolDefinition getToolDefinition() {
+            return DefaultToolDefinition.builder().name(name).description("").inputSchema("{}").build();
+        }
+
+        @Override
+        public String call(String toolInput) {
+            return ChatAssistant.NOT_OFFERED;
         }
     }
 }
