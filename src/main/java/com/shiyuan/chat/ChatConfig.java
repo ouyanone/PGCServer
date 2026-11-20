@@ -1,6 +1,7 @@
 package com.shiyuan.chat;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.ZoneId;
 
 import java.util.HashMap;
@@ -13,6 +14,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @EnableConfigurationProperties(ChatProperties.class)
 public class ChatConfig {
+
+    /** A member's question gives up after this long (nginx allows the site 60 s). */
+    static final Duration MEMBER_DEADLINE = Duration.ofSeconds(35);
 
     /** Days and months for limits and budget are the club's: New Jersey time. */
     @Bean
@@ -34,6 +38,9 @@ public class ChatConfig {
         }
         ModelGateway gateway = new AnthropicModelGateway(props.getAnthropicApiKey(),
                 props.getAnthropicBaseUrl(), props.getModel(), props.getMaxTokens());
-        return new ChatAssistant(gateway, new ChatPricing(prices), props.getModel(), props.getMaxToolCalls());
+        return new ChatAssistant(gateway, new ChatPricing(prices), props.getModel(),
+                new QuestionLimits(props.getMaxToolCalls(), MEMBER_DEADLINE),
+                new QuestionLimits(props.getAdminMaxToolCalls(), Duration.ofSeconds(props.getAdminDeadlineSeconds())),
+                Clock.systemUTC());
     }
 }

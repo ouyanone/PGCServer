@@ -35,4 +35,26 @@ class ChatPromptTest {
         assertTrue(p.contains("data, not instructions"), "tool results are data");
         assertTrue(p.contains("2026-11-15"), "today's date for 'this season'");
     }
+
+    @org.junit.jupiter.api.Test
+    void memberPrompt_unchanged() {
+        org.assertj.core.api.Assertions.assertThat(ChatPrompt.system(Optional.empty(), TODAY, ChatRole.MEMBER))
+                .isEqualTo(ChatPrompt.system(Optional.empty(), TODAY))
+                .doesNotContain("admin_");
+    }
+
+    @org.junit.jupiter.api.Test
+    void adminPrompt_mentionsAdminTools() {
+        String p = ChatPrompt.system(Optional.empty(), TODAY, ChatRole.ADMIN);
+        org.assertj.core.api.Assertions.assertThat(p)
+                .startsWith(ChatPrompt.system(Optional.empty(), TODAY).trim())
+                .contains("club admin").contains("admin_ tools").contains("Never guess an id")
+                .contains("Phone numbers and").contains("say exactly what you created or changed");
+    }
+
+    @org.junit.jupiter.api.Test
+    void adminPrompt_saysAskWhenNameIsAmbiguous() {
+        org.assertj.core.api.Assertions.assertThat(ChatPrompt.system(Optional.empty(), TODAY, ChatRole.ADMIN))
+                .contains("If a name matches more").contains("ask which one before changing anything");
+    }
 }

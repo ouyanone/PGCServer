@@ -87,7 +87,7 @@ class ChatControllerTest {
 
     /** Make the assistant answer, spending the given tokens and cost on the meter it is handed. */
     private void assistantAnswers(String text, long in, long out, String cost) {
-        when(assistant.answer(anyString(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
+        when(assistant.answer(anyString(), any(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
             meter(inv.getArgument(4), in, out, cost);
             return text;
         });
@@ -107,7 +107,7 @@ class ChatControllerTest {
     void anonymous_post_401() throws Exception {
         mvc.perform(post("/webapi/chat").contentType(MediaType.APPLICATION_JSON).content(ask("hi")))
                 .andExpect(status().isUnauthorized());
-        verify(assistant, never()).answer(anyString(), any(), any(), any(), any(), any());
+        verify(assistant, never()).answer(anyString(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -152,7 +152,7 @@ class ChatControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.refusal").value("budget"))
                 .andExpect(jsonPath("$.answer").doesNotExist());
-        verify(assistant, never()).answer(anyString(), any(), any(), any(), any(), any());
+        verify(assistant, never()).answer(anyString(), any(), any(), any(), any(), any(), any());
         verify(limits, never()).tryConsume(anyString());
     }
 
@@ -162,7 +162,7 @@ class ChatControllerTest {
         mvc.perform(post("/webapi/chat").with(member("sub-A")).contentType(MediaType.APPLICATION_JSON).content(ask("hi")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.refusal").value("daily_limit"));
-        verify(assistant, never()).answer(anyString(), any(), any(), any(), any(), any());
+        verify(assistant, never()).answer(anyString(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -172,12 +172,12 @@ class ChatControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.refusal").value("signin"));
         verify(limits).refund("sub-A");
-        verify(assistant, never()).answer(anyString(), any(), any(), any(), any(), any());
+        verify(assistant, never()).answer(anyString(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void mcp401_signin_refund_costRecorded() throws Exception {
-        when(assistant.answer(anyString(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
+        when(assistant.answer(anyString(), any(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
             meter(inv.getArgument(4), 100, 10, "0.0003");
             throw new McpUnauthorizedException("tools/call: HTTP 401");
         });
@@ -191,7 +191,7 @@ class ChatControllerTest {
 
     @Test
     void modelDown_unavailable_costRecorded_noHistory_refund() throws Exception {
-        when(assistant.answer(anyString(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
+        when(assistant.answer(anyString(), any(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
             meter(inv.getArgument(4), 500, 50, "0.0015");
             throw new ModelUnavailableException("Claude API: InternalServerException");
         });
@@ -247,10 +247,28 @@ class ChatControllerTest {
 
     @Test
     void signin_logsItsCause_mcpRejectedToken(CapturedOutput log) throws Exception {
-        when(assistant.answer(anyString(), any(), any(), any(), any(), any()))
+        when(assistant.answer(anyString(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new McpUnauthorizedException("tools/call: HTTP 401"));
         mvc.perform(post("/webapi/chat").with(member("sub-A")).contentType(MediaType.APPLICATION_JSON).content(ask("hi")))
                 .andExpect(status().isUnauthorized());
         org.assertj.core.api.Assertions.assertThat(log.getOut()).contains("outcome=signin:mcp tools/call: HTTP 401");
+    }
+
+    @Test
+    void adminProfile_passesAdminRole() throws Exception {
+        assistantAnswers("Done.", 10, 5, "0.0001");
+        mvc.perform(post("/webapi/chat").with(oidcLogin().idToken(t -> t.subject("sub-A").claim("profile", "admin")))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"Create a tournament\"}"))
+                .andExpect(status().isOk());
+        verify(assistant).answer(anyString(), any(), any(), any(), any(), any(), eq(com.shiyuan.chat.ChatRole.ADMIN));
+    }
+
+    @Test
+    void noProfile_passesMemberRole() throws Exception {
+        assistantAnswers("Hi.", 10, 5, "0.0001");
+        mvc.perform(post("/webapi/chat").with(member("sub-A"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"Hi\"}"))
+                .andExpect(status().isOk());
+        verify(assistant).answer(anyString(), any(), any(), any(), any(), any(), eq(com.shiyuan.chat.ChatRole.MEMBER));
     }
 }

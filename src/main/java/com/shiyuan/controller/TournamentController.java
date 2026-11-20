@@ -5,6 +5,7 @@ import com.shiyuan.dao.entity.db.Tournament;
 import com.shiyuan.dao.repository.EventRepository;
 import com.shiyuan.dao.repository.TournamentRepository;
 import com.shiyuan.service.EventService;
+import com.shiyuan.service.TournamentAdminService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -22,6 +23,7 @@ public class TournamentController extends BaseController {
     @Autowired private TournamentRepository tournamentRepository;
     @Autowired private EventRepository eventRepository;
     @Autowired private EventService eventService;
+    @Autowired private TournamentAdminService tournamentAdminService;
 
     // ── List all tournaments (with events) ───────────────────────────────────
 
@@ -37,8 +39,7 @@ public class TournamentController extends BaseController {
     public ResponseEntity<Tournament> create(@RequestBody Tournament tournament,
                                              @AuthenticationPrincipal OidcUser principal) throws Exception {
         checkPrincipal(principal);
-        tournament.setId(null);
-        return ResponseEntity.status(HttpStatus.CREATED).body(tournamentRepository.save(tournament));
+        return ResponseEntity.status(HttpStatus.CREATED).body(tournamentAdminService.createTournament(tournament));
     }
 
     // ── Update tournament ─────────────────────────────────────────────────────
@@ -112,12 +113,6 @@ public class TournamentController extends BaseController {
                                              @RequestBody Event event,
                                              @AuthenticationPrincipal OidcUser principal) throws Exception {
         checkPrincipal(principal);
-        Tournament t = tournamentRepository.findById(tournamentId)
-                .orElseThrow(() -> new RuntimeException("Tournament not found: " + tournamentId));
-        event.setId(null);
-        if (event.getEventDesc() == null) event.setEventDesc("");
-        Event saved = eventService.saveEvent(event);
-        saved.setTournament(t);
-        return ResponseEntity.status(HttpStatus.CREATED).body(eventRepository.save(saved));
+        return ResponseEntity.status(HttpStatus.CREATED).body(tournamentAdminService.createEvent(tournamentId, event));
     }
 }

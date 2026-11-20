@@ -93,6 +93,88 @@ public class PlayerServiceImpl implements PlayerService {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
+    public Player addPlayer(com.shiyuan.controller.api.AdminApiDtos.PlayerFields f) {
+        String first = requiredName(f.firstName(), "firstName");
+        String last = requiredName(f.lastName(), "lastName");
+        String gender = gender(f.gender());
+        String ghin = blankToNull(f.ghinNumber());
+        for (Player p : playerRepository.findAll()) {
+            if (first.equalsIgnoreCase(trim(p.getfName())) && last.equalsIgnoreCase(trim(p.getlName()))) {
+                throw com.shiyuan.service.AdminRequestException.conflict("Player " + p.getId() + " is already called "
+                        + p.getfName() + " " + p.getlName() + "; nothing was created.");
+            }
+        }
+        refuseGhinTaken(ghin, null);
+        Player p = new Player();
+        p.setfName(first);
+        p.setlName(last);
+        p.setNickName(blankToNull(f.nickName()));
+        p.setChineseNickName(blankToNull(f.chineseNickName()));
+        p.setGhinNumber(ghin);
+        p.setGender(gender);
+        if (f.handicap() != null) p.setHandicap(f.handicap());
+        p.setIsActive(f.active() == null || f.active());
+        return playerRepository.save(p);
+    }
+
+    @Override
+    @org.springframework.transaction.annotation.Transactional
+    public Player updatePlayer(long id, com.shiyuan.controller.api.AdminApiDtos.PlayerFields f) {
+        Player p = playerRepository.findById(id).orElseThrow(() ->
+                com.shiyuan.service.AdminRequestException.notFound("Player " + id + " does not exist."));
+        if (f.firstName() == null && f.lastName() == null && f.nickName() == null && f.chineseNickName() == null
+                && f.ghinNumber() == null && f.gender() == null && f.handicap() == null && f.active() == null) {
+            throw com.shiyuan.service.AdminRequestException.badRequest("Give at least one field to change.");
+        }
+        if (f.firstName() != null) p.setfName(requiredName(f.firstName(), "firstName"));
+        if (f.lastName() != null) p.setlName(requiredName(f.lastName(), "lastName"));
+        if (f.nickName() != null) p.setNickName(blankToNull(f.nickName()));
+        if (f.chineseNickName() != null) p.setChineseNickName(blankToNull(f.chineseNickName()));
+        if (f.ghinNumber() != null) {
+            String ghin = blankToNull(f.ghinNumber());
+            refuseGhinTaken(ghin, p.getId());
+            p.setGhinNumber(ghin);
+        }
+        if (f.gender() != null) p.setGender(gender(f.gender()));
+        if (f.handicap() != null) p.setHandicap(f.handicap());
+        if (f.active() != null) p.setIsActive(f.active());
+        return playerRepository.save(p);
+    }
+
+    private void refuseGhinTaken(String ghin, Long self) {
+        if (ghin == null) return;
+        for (Player other : playerRepository.findAll()) {
+            if (ghin.equalsIgnoreCase(trim(other.getGhinNumber())) && !other.getId().equals(self)) {
+                throw com.shiyuan.service.AdminRequestException.conflict("GHIN number " + ghin
+                        + " already belongs to player " + other.getId() + "; nothing was changed.");
+            }
+        }
+    }
+
+    private static String requiredName(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw com.shiyuan.service.AdminRequestException.badRequest("The " + field + " is required.");
+        }
+        return value.trim();
+    }
+
+    private static String gender(String value) {
+        String g = blankToNull(value);
+        if (g == null) return null;
+        if (g.equalsIgnoreCase("M") || g.equalsIgnoreCase("F")) return g.toUpperCase();
+        throw com.shiyuan.service.AdminRequestException.badRequest("The gender must be M or F (or left out), not \"" + g + "\".");
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
+    }
+
+    private static String trim(String s) {
+        return s == null ? "" : s.trim();
+    }
+
+    @Override
     public Player getPlayerById(String id) {
         return playerRepository.findById(Long.parseLong(id)).get();
     }

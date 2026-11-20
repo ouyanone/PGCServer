@@ -26,6 +26,7 @@ import com.shiyuan.chat.ChatBudget;
 import com.shiyuan.chat.ChatExchangeDto;
 import com.shiyuan.chat.ChatHistoryService;
 import com.shiyuan.chat.ChatLimits;
+import com.shiyuan.chat.ChatRole;
 import com.shiyuan.chat.ChatUsage;
 import com.shiyuan.chat.McpGateway;
 import com.shiyuan.chat.McpSession;
@@ -112,7 +113,8 @@ public class ChatController {
             String accessToken = tokens.accessToken(auth, request, response);
             String answer;
             try (McpSession session = mcp.open(accessToken)) {
-                answer = assistant.answer(question, me, history.recent(sub), session, usage, LocalDate.now(clock));
+                answer = assistant.answer(question, me, history.recent(sub), session, usage, LocalDate.now(clock),
+                        ChatRole.of(member));
             }
             history.save(sub, question, answer);
             outcome = "answered";

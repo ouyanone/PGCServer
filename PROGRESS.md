@@ -2103,3 +2103,184 @@ month for $10.
   commits. The two tracked `dist/` files changed by the deploy build were left uncommitted on
   purpose, because the deploy builds `dist/` fresh.
 - Both PRs say the branch is already in production, so merging records reality.
+
+### STEP62 — Old WAR archives cleared on the server 🧹 (2026-11-16)
+
+**Asked for:** "lets clean the 50 old wars first". The owner chose to keep the 2 newest.
+
+- **Kept:**
+  - `ROOT.war.11162026_0037`, the pre-chatbot site and today's rollback (built 2026-10-22);
+  - `ROOT.war.10222026_1532`, one step further back;
+  - the live `ROOT.war` and its exploded `ROOT/`.
+- **Deleted:** the other 48 dated copies (2025 through 2026-10-21), about 3.2 GB. The list was
+  dry-run first (48 files, none of them a keeper or the live WAR), then removed with the same
+  `find … -delete` filter.
+- **Disk:** 7.0 G used, 954 MB free (89%) → 4.4 G used, 3.6 GB free (56%).
+- Tomcat was untouched and stayed active; the site returns 200.
+- **Noticed:** `webapps/shiyuan_db_dump_01262025.sql` (203 bytes) is not an app; Tomcat ignores it.
+
+### STEP63 — Spring Boot 3.3.5 → 3.5.16 ⬆️ (2026-11-17)
+
+**Asked for:** "lets upgrade pgcserver to spring boot 3.5.16". This is the first step towards
+Spring AI (Spring AI 1.1.x needs Boot 3.4 or 3.5). Boot 4 stays off the table, because
+production runs Tomcat 10.1.30 and Boot 4 needs Tomcat 11.
+
+- **Branch:** `feature-boot-3.5`, cut from `feature-07182026` at `43b5748`, so PR #3 is
+  untouched.
+- **Change:** one line in `pom.xml`, the parent version. No code or property changes were
+  needed.
+- **Resolved versions:**
+  - Spring Framework 6.2.19, Spring Security 6.5.11, Hibernate 6.6.53;
+  - Jackson 2.21.4, Tomcat (embedded, `provided`) 10.1.55, mysql-connector-j 9.7.0;
+  - Anthropic SDK 3.2.0, unchanged and working on Jackson 2.21.
+- **Tests:** `mvn clean test -Dspring.profiles.active=local` on JDK 21 → 144 tests, 0 failures,
+  0 errors. That includes `contextLoads` and the Anthropic SDK loopback test.
+- **Property check:** `spring-boot-properties-migrator` was added for one run and then removed.
+  It reported no renamed keys, but it broke datasource loading in this project. The keys in use
+  (`spring.datasource.*`, `spring.jpa.*`, `spring.security.oauth2.client.*`,
+  `spring.servlet.multipart.*`, `spring.config.import`) are unchanged from 3.3 to 3.5.
+- **Production fit:** Boot 3.5 uses Servlet 6.0, which the server's Tomcat 10.1.30 provides.
+- **Noticed, not acted on:** Hibernate warns that `hibernate.dialect` (`MySQL5Dialect`) need not
+  be set.
+- **Deployed (2026-11-17, 19:56 UTC), asked for with "let build and push to aws":**
+  - The UI was not rebuilt. PGCUI is unchanged, and `static/` already held the deployed bundle
+    (`main.fca1d2e4c84ed027.js`).
+  - `mvn -DskipTests clean package` produced a 114 MB WAR with one `main.*.js`. Embedded Tomcat
+    is in `WEB-INF/lib-provided/`, which the server's Tomcat ignores.
+  - Database backed up first: `db-dump/pgc-20261117-145627-server-backup.sql.gz` (16 tables,
+    the dump completed).
+  - The old WAR was archived as `ROOT.war.11172026_1456` (the chatbot build on Boot 3.3.5).
+  - After the restart, the log shows `Spring Boot (v3.5.16)` and the WAR deployed with no
+    SEVERE lines. tomcat, nginx and pgc-mcp are all active.
+  - Probes: the home page returns 200; `/webapi/chat/history` without a login returns 401, as
+    expected; the MCP protected-resource metadata returns 200.
+- **Rollback:** `sudo systemctl stop tomcat; sudo mv $T/webapps/ROOT.war /tmp/ROOT.war.boot35;`
+  `sudo rm -rf $T/webapps/ROOT; sudo mv $T/webapps/ROOT.war.11172026_1456 $T/webapps/ROOT.war;`
+  `sudo systemctl start tomcat` (`T=/myApp/apache-tomcat-10.1.30`).
+- **Verified in production by the owner:** "checked the online site, its working".
+- **Not yet done:** commit and push of `feature-boot-3.5`.
+
+### STEP64 — Club assistant, Spring AI edition (the S button) 🅢 (2026-11-17)
+
+**Asked for:** "implement the chatbot using spring ai … exactly the same function … put a icon next to the current icon … letter S". This is for learning; the two bots share history, the daily limit and the budget.
+
+- **Design and plan:**
+  - `docs/superpowers/specs/2026-11-17-spring-ai-chatbot-design.md`
+  - `docs/superpowers/plans/2026-11-17-spring-ai-chatbot.md`
+- **Backend** (`feature-boot-3.5`), package `com.shiyuan.chat.springai`, Spring AI 1.1.8 through `spring-ai-bom`, no starters:
+  - `SpringAiModels`: a lazily built `AnthropicChatModel` (one attempt per call, 20 s timeout, tool execution off). A blank key doesn't stop start-up.
+  - `McpToolsSession`: a per-question MCP SDK 0.18.3 client sending the member's Bearer token. Its tools become `SyncMcpToolCallback`s. `StatusRecordingHttpClient` exists because the SDK hides the HTTP status, and a 401 must still mean "sign in again".
+  - `SpringAiChatAssistant`: Spring AI's user-controlled tool loop (`ChatModel` + `DefaultToolCallingManager`), with 5 tool calls and 35 s per question, priced per call.
+  - `SpringAiChatController`: `POST /webapi/chat/spring`, with the same flow as `/webapi/chat`. Its log line has `impl=springai`.
+- **UI** (PGCUI `feature-spring-ai-chat`, `c22198d2`): a circled **S** button next to 💬 opens the same panel, titled "Club Assistant (Spring AI)". Only one bot is open at a time.
+- **Tests:** PGCServer 176/176. PGCUI chat specs 30/30, and the production build exits 0.
+- **Spring AI 1.1.8 findings:**
+  - it drops Claude's thinking blocks between tool rounds (the API accepts the removed block);
+  - it can split one reply across several generations;
+  - `SyncMcpToolCallback` throws a plain `IllegalStateException` for a tool's error result;
+  - it can't set `output_config.effort`, so the S bot runs at the default effort.
+- **Deployed 2026-11-18 02:24 UTC** at the owner's request ("no hurry, just build and deploy. i will test on real server"), before the final review finished and without a local run with a real key:
+  - Database backed up to `db-dump/pgc-20261117-212425-server-backup.sql.gz` (16 tables, completed).
+  - Old WAR archived as `ROOT.war.11172026_2124` (the Boot 3.5.16 build).
+  - New WAR is 133 MB (it was 114). Spring AI brings WebFlux and Reactor, and the app still starts as a servlet app.
+  - Checks: the log shows Spring Boot v3.5.16 and the WAR deployed with no SEVERE lines; tomcat, nginx and pgc-mcp are active; the home page returns 200; `/webapi/chat/spring` without a login returns 401; the bundle `main.8d0ea1115722303a.js` is served.
+- **Rollback:** `sudo systemctl stop tomcat; sudo mv $T/webapps/ROOT.war /tmp/ROOT.war.springai; sudo rm -rf $T/webapps/ROOT;`
+  `sudo mv $T/webapps/ROOT.war.11172026_2124 $T/webapps/ROOT.war; sudo systemctl start tomcat`.
+- **Verified in production by the owner:** "it worked". This settles the thinking-block risk: a
+  real Claude tool round with the thinking block dropped by Spring AI is accepted.
+- **Final review** (fresh reviewer): 0 Critical, 3 Important.
+  - Fixed in `b7907aa`, with tests that failed first; suite 179/179:
+    - a tool call with no reply no longer reuses an earlier 200;
+    - the deadline is checked before every tool call;
+    - an MCP 403 means "sign in again".
+  - Deferred minors: in the PR description and the final message.
+- **Fixes deployed 2026-11-18 02:32 UTC** (asked for with "yes"):
+  - database backed up to `db-dump/pgc-20261117-213148-server-backup.sql.gz` (16 tables, completed);
+  - the old WAR archived as `ROOT.war.11172026_2131`;
+  - the log shows Spring Boot v3.5.16 and 0 SEVERE lines; tomcat, nginx and pgc-mcp are active; the home page returns 200; `/webapi/chat/spring` without a login returns 401.
+- **Pushed, with PRs into `main`:** PGCServer #4 (`feature-boot-3.5`, the Boot upgrade and the Spring AI bot) and PGCUI #3 (`feature-spring-ai-chat`, the S button).
+
+## STEP65 — Lettered chat icons (PGCUI, 2026-11-18)
+- **Request:** the owner disliked the circled-S badge and asked for the original chat icon to carry a **J** (Anthropic Java SDK bot) and the Spring AI one an **S**. A preview with two options was shown; the owner chose **option A**.
+- **Change (PGCUI `feature-spring-ai-chat`, menubar only):**
+  - both buttons are now a solid `chat_bubble` Material icon with the letter overlaid in the toolbar blue (`.chat-letter`, `aria-hidden`);
+  - the aria-labels are unchanged, and the old `.chat-s-badge` style is removed.
+- **Tests:**
+  - `menubar.component.spec.ts` gained "chat icon is a bubble marked J", and the S test now checks the bubble and its letter;
+  - both failed before the change and pass after;
+  - the menubar, chat panel and chat service specs pass 31/31;
+  - the full UI suite has 26 failures in the old auto-generated "should create" specs, the same count without this change.
+- **Deployed 2026-11-18 16:29 UTC** (the owner said "deploy it"):
+  - database backed up to `db-dump/pgc-20261118-112812-server-backup.sql.gz` (16 tables, completed);
+  - the previous WAR archived as `ROOT.war.11182026_1129`;
+  - new WAR 133 MB, with one bundle, `main.6ad8908345ac18d0.js`;
+  - checks: the home page returns 200 and serves that bundle; 0 SEVERE lines; tomcat, nginx and pgc-mcp are active; `/webapi/chat/spring` without a login returns 401.
+- **Not yet committed or pushed** (PGCUI change, the bundled static files and this entry).
+
+## STEP66 — MCP admin tools (built 2026-11-18, not yet deployed)
+- **Request:** club admins set up tournaments by telling either club bot what they want; the MCP
+  server gets write tools that call new token-only admin APIs. Spec:
+  `docs/superpowers/specs/2026-11-18-mcp-admin-tools-design.md`; plan:
+  `docs/superpowers/plans/2026-11-18-mcp-admin-tools.md` (inline execution).
+- **Cognito (owner, production pool):** new scope `https://pgcgolf.club/mcp/tools.write` on the
+  `pgc-mcp` resource server, allowed on the website's app client. Verified with an authorize probe
+  (first attempt `invalid_scope`, fixed, then both scopes reach the login page).
+- **PGCServer** (branch `feature-mcp-admin-tools` from `feature-boot-3.5`):
+  - `ApiSecurityConfiguration`: a second, stateless chain for `/api/**` — Cognito bearer access
+    tokens only (`token_use=access`, issuer, signature); `/api/admin/**` needs `tools.write`. The
+    website's session login never opens `/api`. The website sign-in now also asks for `tools.write`.
+  - `GamePlanService`, `TournamentAdminService`: the website's admin logic moved out of the
+    controllers, shared with `/api/admin`; tests pin the website's behaviour.
+  - `AdminApiController` `/api/admin/**`: tournaments, events, rewards, roster, grouping (refused
+    once scores exist), late player, tee time, add/update player (never phone or email).
+  - Both bots: `ChatRole` from the `profile=admin` sign-in claim. Non-admins never see an
+    `admin_` tool; admins get an extra prompt section, 15 tool calls and 35 s.
+  - Tests: 275/275 (was 179).
+- **PGCSpringMCP** (branch `feature-admin-tools` from `feature-phase2-oauth`):
+  - `WriteScopePolicy` (the first real `AccessPolicy`): `admin_*` tools need `tools.write`.
+  - `PgcAdminApi`: POST/PUT/PATCH to `/api/admin/` only, with the caller's own token, no redirects.
+  - `AdminTools` (9 `admin_*` tools) plus `list_seasons` and `get_event_groups`: 23 tools in all.
+  - Tests: 187/187 (was 153).
+- **Rulings that changed the plan:**
+  - admin deadline 35 s, not 90 s (nginx's 60 s timeout, plus up to 20 s for a call already started);
+  - event names are unique across the whole club (database key), so the bot is told to include the
+    tournament name;
+  - seven grouping strategies (RANDOM too), not six;
+  - website regrouping with an empty roster no longer deletes the old tees first.
+  - The full list is in the final message to the owner.
+- **Final review** (fresh reviewer): 1 Critical, 3 Important, plus 1 Minor re-graded to Important.
+  All five fixed, each with a test that failed first:
+  - an admin stopped part-way (limit, deadline or outage) is told what was done, never "try again later";
+  - duplicate events and rewards are refused;
+  - shorter MCP write timeouts;
+  - the website's empty-roster regroup answers 400 again.
+  Deferred minors: a null score breaks the "has scores" check (fails safe); `/api/admin` logs ids,
+  not who made the change; two identical creates sent at the same moment.
+- **Merged** (owner, 2026-11-19): PGCServer #5 → `feature-boot-3.5`, PGCSpringMCP #2 →
+  `feature-phase2-oauth`, PGCUI #3 → `main`. PGCServer #4 and PGCSpringMCP #1 (into `main`) still open.
+- **Deployed 2026-11-19 ~03:02 UTC** from those branches; the trees are identical to the reviewed commits:
+  - DB backup `db-dump/pgc-20261118-220020-server-backup.sql.gz` (16 tables, completed).
+  - Website: old WAR archived as `ROOT.war.11182026_2201`; new WAR 133 MB, bundle `main.6ad8908345ac18d0.js`.
+  - Website checks: home 200; anonymous or fake-token `POST /api/admin/tournaments` → 401 with
+    `WWW-Authenticate: Bearer`; both chat endpoints → 401 without a login; 0 SEVERE/ERROR lines.
+  - MCP: old jar copied to `/opt/pgc-mcp/pgc-spring-mcp.jar.bak-20261119-pre-admin-tools`.
+  - MCP checks: log says "Registered tools: 23"; anonymous `/mcp` → 401; protected-resource
+    document 200; tomcat, nginx and pgc-mcp all active.
+  - Rollback, website: archived WAR. Rollback, MCP: `systemctl stop pgc-mcp`, copy the `.bak-20261119-pre-admin-tools` jar back, start.
+- **Verified in production by the owner** (2026-11-19): "the mcp tests looked good".
+
+## STEP67 — Claude Code connected to the MCP server with admin tools (2026-11-19)
+
+- **Cognito:** owner created a Claude Code app client `255o6dv0cngqc5rd26c567ooas` in the
+  production pool (SPA type, no secret, callback `http://localhost:8765/callback`), allowed
+  `openid`, `tools.read` and `tools.write`. The old entry's client `68141fpd…` did not exist in the
+  production pool (Cognito answered `invalid_request`).
+- **Claude Code config** (`~/.claude.json`, user scope, server `pgc-golf-http`): the field is
+  `oauth.scopes`, one space-separated string. `scope` is silently dropped and a list is rejected.
+  Without it Claude Code asks only for the advertised `tools.read`.
+- **Verified by the owner:** admin tools work from Claude Code.
+- **Accepted risk (D2, owner's choice):** any member who signs in through this client gets the
+  admin tools, until a Cognito `admin` group check exists in `WriteScopePolicy` and `/api/admin`.
+- **Found, not fixed:** the website has no sign-out button, and `/logout` ends only the website
+  session, not Cognito's. Workaround: `/logout`, then Cognito `/logout?client_id=…&redirect_uri=<registered callback>&response_type=code`.
+  `player.component.ts:46` still sends people to `shiyuan.club` to sign in.
