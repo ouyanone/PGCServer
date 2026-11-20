@@ -2256,4 +2256,31 @@ production runs Tomcat 10.1.30 and Boot 4 needs Tomcat 11.
   - the website's empty-roster regroup answers 400 again.
   Deferred minors: a null score breaks the "has scores" check (fails safe); `/api/admin` logs ids,
   not who made the change; two identical creates sent at the same moment.
-- **Not yet:** deploy, the owner's TEST Cup walkthrough.
+- **Merged** (owner, 2026-11-19): PGCServer #5 → `feature-boot-3.5`, PGCSpringMCP #2 →
+  `feature-phase2-oauth`, PGCUI #3 → `main`. PGCServer #4 and PGCSpringMCP #1 (into `main`) still open.
+- **Deployed 2026-11-19 ~03:02 UTC** from those branches; the trees are identical to the reviewed commits:
+  - DB backup `db-dump/pgc-20261118-220020-server-backup.sql.gz` (16 tables, completed).
+  - Website: old WAR archived as `ROOT.war.11182026_2201`; new WAR 133 MB, bundle `main.6ad8908345ac18d0.js`.
+  - Website checks: home 200; anonymous or fake-token `POST /api/admin/tournaments` → 401 with
+    `WWW-Authenticate: Bearer`; both chat endpoints → 401 without a login; 0 SEVERE/ERROR lines.
+  - MCP: old jar copied to `/opt/pgc-mcp/pgc-spring-mcp.jar.bak-20261119-pre-admin-tools`.
+  - MCP checks: log says "Registered tools: 23"; anonymous `/mcp` → 401; protected-resource
+    document 200; tomcat, nginx and pgc-mcp all active.
+  - Rollback, website: archived WAR. Rollback, MCP: `systemctl stop pgc-mcp`, copy the `.bak-20261119-pre-admin-tools` jar back, start.
+- **Verified in production by the owner** (2026-11-19): "the mcp tests looked good".
+
+## STEP67 — Claude Code connected to the MCP server with admin tools (2026-11-19)
+
+- **Cognito:** owner created a Claude Code app client `255o6dv0cngqc5rd26c567ooas` in the
+  production pool (SPA type, no secret, callback `http://localhost:8765/callback`), allowed
+  `openid`, `tools.read` and `tools.write`. The old entry's client `68141fpd…` did not exist in the
+  production pool (Cognito answered `invalid_request`).
+- **Claude Code config** (`~/.claude.json`, user scope, server `pgc-golf-http`): the field is
+  `oauth.scopes`, one space-separated string. `scope` is silently dropped and a list is rejected.
+  Without it Claude Code asks only for the advertised `tools.read`.
+- **Verified by the owner:** admin tools work from Claude Code.
+- **Accepted risk (D2, owner's choice):** any member who signs in through this client gets the
+  admin tools, until a Cognito `admin` group check exists in `WriteScopePolicy` and `/api/admin`.
+- **Found, not fixed:** the website has no sign-out button, and `/logout` ends only the website
+  session, not Cognito's. Workaround: `/logout`, then Cognito `/logout?client_id=…&redirect_uri=<registered callback>&response_type=code`.
+  `player.component.ts:46` still sends people to `shiyuan.club` to sign in.
